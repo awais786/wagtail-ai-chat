@@ -2,9 +2,14 @@
 Setup configuration for Wagtail RAG package.
 """
 from setuptools import find_packages, setup
+import os
 
-with open("README.md", "r", encoding="utf-8") as fh:
-    long_description = fh.read()
+# Read README if it exists
+readme_path = os.path.join(os.path.dirname(__file__), "README.md")
+long_description = ""
+if os.path.exists(readme_path):
+    with open(readme_path, "r", encoding="utf-8") as fh:
+        long_description = fh.read()
 
 setup(
     name="wagtail-rag",
@@ -13,8 +18,11 @@ setup(
     description="A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/wagtail-rag",
-    packages=find_packages(),
+    url="https://github.com/awais786/wagtail-ai-chat",
+    packages=find_packages(where=".", exclude=['tests', 'tests.*']),
+    package_dir={"": "."},
+    include_package_data=True,
+    py_modules=[],
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
