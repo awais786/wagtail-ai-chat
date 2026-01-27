@@ -115,36 +115,36 @@ class Command(BaseCommand):
         """
         if not streamfield:
             return ''
-        
+
         text_parts = []
         for block in streamfield:
             try:
                 block_type = block.block_type.lower()
                 block_value = block.value
-                
+
                 # Extract text based on block type
                 if 'heading' in block_type:
                     text = self._extract_text_from_value(block_value, ['heading_text', 'text'])
                     if text:
                         text_parts.append(f"## {text}")
-                
+
                 elif 'paragraph' in block_type or 'richtext' in block_type:
                     if hasattr(block_value, 'source'):
                         text_parts.append(block_value.source)
                     else:
                         text_parts.append(str(block_value))
-                
+
                 elif 'quote' in block_type:
                     quote_text = self._extract_text_from_value(block_value, ['text', 'quote'])
                     if quote_text:
                         attribute = self._extract_text_from_value(block_value, ['attribute_name', 'attribute'])
                         text_parts.append(f'"{quote_text}"' + (f' - {attribute}' if attribute else ''))
-                
+
                 elif 'image' in block_type:
                     caption = self._extract_text_from_value(block_value, ['caption', 'alt'])
                     if caption:
                         text_parts.append(f"[Image: {caption}]")
-                
+
                 elif 'list' in block_type:
                     if isinstance(block_value, (list, tuple)):
                         for item in block_value:
@@ -152,20 +152,21 @@ class Command(BaseCommand):
                             text_parts.append(f"- {item_text}")
                     else:
                         text_parts.append(f"- {str(block_value)}")
-                
+
                 else:
                     # Generic fallback
-                    text = self._extract_text_from_value(block_value, ['text', 'content', 'value', 'body', 'description'])
+                    text = self._extract_text_from_value(block_value,
+                                                         ['text', 'content', 'value', 'body', 'description'])
                     if text:
                         text_parts.append(text)
                     else:
                         text_parts.append(str(block_value))
-            
+
             except Exception:
                 continue
-        
+
         return '\n'.join(text_parts)
-    
+
     def _extract_text_from_value(self, value, keys):
         """Helper to extract text from dict or return string value."""
         if isinstance(value, dict):
@@ -175,7 +176,7 @@ class Command(BaseCommand):
         elif isinstance(value, str) and value:
             return value
         return None
-    
+
     def _extract_text_from_richtext(self, html_content):
         """
         Extract clean text from RichTextField HTML content.
@@ -183,7 +184,7 @@ class Command(BaseCommand):
         """
         if not html_content:
             return ''
-        
+
         try:
             # Try using BeautifulSoup if available
             from bs4 import BeautifulSoup
@@ -207,48 +208,48 @@ class Command(BaseCommand):
     def _get_page_models(self, model_names=None, exclude_models=None):
         """
         Get all Wagtail Page models dynamically.
-        
+
         Args:
             model_names: List of specific model names to include (e.g., ['blog.BlogPage'])
             exclude_models: List of model names to exclude (e.g., ['wagtailcore.Page'])
-        
+
         Returns:
             List of Page model classes
         """
         page_models = []
-        
+
         # Get all models that inherit from Page
         for app_config in apps.get_app_configs():
             for model in app_config.get_models():
                 if issubclass(model, Page) and model != Page:
                     model_name = f"{model._meta.app_label}.{model.__name__}"
-                    
+
                     # Check if model should be included
                     if model_names:
                         if model_name not in model_names:
                             continue
-                    
+
                     # Check if model should be excluded
                     if exclude_models:
                         if model_name in exclude_models:
                             continue
-                    
+
                     page_models.append(model)
-        
+
         return page_models
 
     def _extract_page_text(self, page, important_fields=None):
         """
         Generic method to extract text content from any Wagtail Page.
         Works with common Wagtail fields and patterns.
-        
+
         Args:
             page: The Wagtail Page instance
             important_fields: List of field names to emphasize (e.g., ['bread_type', 'origin'])
         """
         # Start with title
         text_parts = [f"Title: {page.title}"]
-        
+
         # If important fields are specified, extract and emphasize them first
         if important_fields:
             for field_name in important_fields:
@@ -271,18 +272,18 @@ class Command(BaseCommand):
                                 continue
                         else:
                             field_value = str(value)
-                        
+
                         # Emphasize important fields by adding them multiple times
                         label = field_name.replace('_', ' ').title()
                         text_parts.insert(0, f"{label}: {field_value}")  # Put at top
                         text_parts.append(f"{label}: {field_value}")  # Also at end
-        
+
         # Common Wagtail fields
         common_fields = [
             'subtitle', 'introduction', 'description', 'summary',
             'date_published', 'first_published_at'
         ]
-        
+
         for field_name in common_fields:
             if hasattr(page, field_name):
                 value = getattr(page, field_name, None)
@@ -293,7 +294,7 @@ class Command(BaseCommand):
                         # Capitalize field name for display
                         label = field_name.replace('_', ' ').title()
                         text_parts.append(f"{label}: {value}")
-        
+
         # Extract StreamField content (common field name: 'body')
         streamfield_fields = ['body', 'content', 'backstory', 'instructions']
         for field_name in streamfield_fields:
@@ -304,7 +305,7 @@ class Command(BaseCommand):
                     if streamfield_text:
                         label = field_name.replace('_', ' ').title()
                         text_parts.append(f"{label}:\n{streamfield_text}")
-        
+
         # Extract RichTextField content
         if hasattr(page, '_meta'):
             for field in page._meta.get_fields():
@@ -320,7 +321,7 @@ class Command(BaseCommand):
                                     text_parts.append(f"{field.name.title()}: {rich_text}")
                             else:
                                 text_parts.append(f"{field.name.title()}: {str(value)}")
-        
+
         # Extract tags if available
         if hasattr(page, 'get_tags'):
             try:
@@ -329,7 +330,7 @@ class Command(BaseCommand):
                     text_parts.append(f"Tags: {', '.join([str(tag) for tag in tags])}")
             except Exception:
                 pass
-        
+
         # Extract authors if available
         if hasattr(page, 'authors'):
             try:
@@ -345,15 +346,15 @@ class Command(BaseCommand):
                         text_parts.append(f"Authors: {', '.join(author_names)}")
             except Exception:
                 pass
-        
+
         # Extract address if available
         if hasattr(page, 'address') and page.address:
             text_parts.append(f"Address: {page.address}")
-        
+
         # Extract coordinates if available
         if hasattr(page, 'lat_long') and page.lat_long:
             text_parts.append(f"Coordinates: {page.lat_long}")
-        
+
         # Extract operating hours if available
         if hasattr(page, 'operating_hours'):
             try:
@@ -367,21 +368,21 @@ class Command(BaseCommand):
                         text_parts.append(f"Operating Hours:\n" + '\n'.join(hours_text))
             except Exception:
                 pass
-        
+
         return '\n\n'.join(text_parts)
 
     def _parse_model_fields(self, model_fields_arg):
         """
         Parse --model-fields argument.
-        
+
         Format: model_name:field1,field2 model_name2:field3
-        
+
         Returns:
             Dict mapping model names to list of important fields
         """
         if not model_fields_arg:
             return {}
-        
+
         model_fields_map = {}
         for item in model_fields_arg:
             if ':' in item:
@@ -390,38 +391,39 @@ class Command(BaseCommand):
                 model_fields_map[model_name] = fields
         return model_fields_map
 
-    def _get_pages_to_index(self, model_names=None, exclude_models=None, model_fields_map=None, important_fields=None, page_id=None):
+    def _get_pages_to_index(self, model_names=None, exclude_models=None, model_fields_map=None, important_fields=None,
+                            page_id=None):
         """
         Get pages to index based on model selection.
-        
+
         Args:
             model_names: List of specific model names to include
             exclude_models: List of model names to exclude
             model_fields_map: Dict mapping model names to important fields
             important_fields: Global list of important fields for all models
             page_id: Specific page ID to re-index (if provided, only this page is indexed)
-        
+
         Returns:
             Tuple of (pages_text_list, metadata_list)
         """
         pages = []
         metadata = []
-        
+
         # Get page models to index
         page_models = self._get_page_models(model_names=model_names, exclude_models=exclude_models)
-        
+
         if not page_models:
             self.stdout.write(self.style.WARNING('No page models found to index.'))
             return pages, metadata
-        
+
         self.stdout.write(f'Found {len(page_models)} page model(s) to index:')
         for model in page_models:
             self.stdout.write(f'  - {model._meta.app_label}.{model.__name__}')
-        
+
         # Extract text from each page
         for model in page_models:
             model_name = f"{model._meta.app_label}.{model.__name__}"
-            
+
             # If page_id is specified, only get that specific page
             if page_id:
                 try:
@@ -434,28 +436,29 @@ class Command(BaseCommand):
                     continue
             else:
                 live_pages = model.objects.live()
-            
+
             count = live_pages.count()
-            
+
             if count == 0:
                 if not page_id:  # Only warn if not looking for specific page
                     self.stdout.write(f'  No live pages found for {model_name}')
                 continue
-            
+
             if not page_id:
                 self.stdout.write(f'  Indexing {count} pages from {model_name}...')
-            
+
             for page in live_pages:
                 try:
                     # Get important fields for this specific model
                     model_important_fields = model_fields_map.get(model_name, [])
                     # Combine with global important fields
                     all_important_fields = list(set((important_fields or []) + model_important_fields))
-                    
-                    page_text = self._extract_page_text(page, important_fields=all_important_fields if all_important_fields else None)
+
+                    page_text = self._extract_page_text(page,
+                                                        important_fields=all_important_fields if all_important_fields else None)
                     if page_text.strip():  # Only add non-empty text
                         pages.append(page_text)
-                        
+
                         # Build metadata with page-specific fields
                         page_metadata = {
                             'source': model_name,
@@ -466,7 +469,7 @@ class Command(BaseCommand):
                             'id': page.id,
                             'slug': page.slug if hasattr(page, 'slug') else '',
                         }
-                        
+
                         # Add any important fields to metadata generically
                         if all_important_fields:
                             for field_name in all_important_fields:
@@ -488,7 +491,7 @@ class Command(BaseCommand):
                                                 ])
                                         else:
                                             page_metadata[field_name] = str(value)
-                        
+
                         metadata.append(page_metadata)
                 except Exception as e:
                     self.stdout.write(
@@ -496,7 +499,7 @@ class Command(BaseCommand):
                             f'  Error extracting text from {model_name} (ID: {page.id}): {e}'
                         )
                     )
-        
+
         return pages, metadata
 
     def handle(self, *args, **options):
@@ -510,13 +513,13 @@ class Command(BaseCommand):
         reset = options['reset']
         reset_only = options['reset_only']
         page_id = options['page_id']
-        
+
         # Parse model-specific fields
         model_fields_map = self._parse_model_fields(model_fields_arg)
-        
+
         if page_id:
             self.stdout.write(f'Re-indexing specific page ID: {page_id}')
-        
+
         if model_fields_map:
             self.stdout.write(f'Model-specific important fields: {model_fields_map}')
         if important_fields:
@@ -545,10 +548,10 @@ class Command(BaseCommand):
             self.stdout.write(f'Extracting data from specified models: {", ".join(model_names)}')
         else:
             self.stdout.write('Extracting data from all Page models...')
-        
+
         if exclude_models:
             self.stdout.write(f'Excluding models: {", ".join(exclude_models)}')
-        
+
         texts, metadatas = self._get_pages_to_index(
             model_names=model_names,
             exclude_models=exclude_models,
@@ -556,7 +559,7 @@ class Command(BaseCommand):
             important_fields=important_fields,
             page_id=page_id
         )
-        
+
         if not texts:
             self.stdout.write(self.style.WARNING('No pages found to index.'))
             return
@@ -570,45 +573,45 @@ class Command(BaseCommand):
             chunk_overlap=chunk_overlap,
             length_function=len,
         )
-        
+
         chunks = []
         chunk_metadatas = []
         chunk_ids = []
         for i, (text, metadata) in enumerate(zip(texts, metadatas)):
             text_chunks = text_splitter.split_text(text)
-            
+
             # Build prefix with identifying information for each chunk
             # Include all available metadata for context
             prefix_parts = [f"Title: {metadata.get('title', 'Unknown')}"]
-            
+
             # Add any additional metadata fields generically (exclude internal fields)
             exclude_from_prefix = {'source', 'model', 'app', 'id', 'slug', 'url', 'chunk_index', 'total_chunks'}
             for key, value in metadata.items():
                 if key not in exclude_from_prefix and value:
                     prefix_parts.append(f"{key.replace('_', ' ').title()}: {value}")
-            
+
             prefix = " | ".join(prefix_parts) + "\n\n"
-            
+
             # Generate deterministic IDs based on page metadata
             page_id = metadata.get('id')
             app = metadata.get('app', 'unknown')
             model = metadata.get('model', 'unknown')
-            
+
             for chunk_idx, chunk in enumerate(text_chunks):
                 # Prepend identifying information to each chunk for better context
                 chunk_with_context = prefix + chunk
                 chunks.append(chunk_with_context)
-                
+
                 # Generate deterministic ID: app_model_pageid_chunkidx
                 chunk_id = f"{app}_{model}_{page_id}_{chunk_idx}"
                 chunk_ids.append(chunk_id)
-                
+
                 chunk_metadatas.append({
                     **metadata,
                     'chunk_index': chunk_idx,
                     'total_chunks': len(text_chunks)
                 })
-        
+
         self.stdout.write(f'Created {len(chunks)} chunks from {len(texts)} pages')
 
         # Initialize embeddings
@@ -650,7 +653,7 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(f'Collection "{collection_name}" cleared successfully'))
             except Exception as e:
                 self.stdout.write(self.style.WARNING(f'Collection may not exist: {e}'))
-        
+
         # If reset-only, exit here without indexing
         if reset_only:
             self.stdout.write(self.style.SUCCESS('Reset complete. No indexing performed.'))
@@ -658,7 +661,7 @@ class Command(BaseCommand):
 
         # Create/update vector store with deterministic IDs
         self.stdout.write(f'Storing chunks in ChromaDB (collection: {collection_name})...')
-        
+
         # Check if collection exists to determine if we're updating or creating
         try:
             existing_db = Chroma(
@@ -681,15 +684,15 @@ class Command(BaseCommand):
                                 metadata = all_chunks['metadatas'][idx]
                                 if metadata and metadata.get('id') == page_id:
                                     page_chunk_ids.append(chunk_id)
-                        
+
                         if page_chunk_ids:
                             existing_db.delete(ids=page_chunk_ids)
                             self.stdout.write(f'  Deleted {len(page_chunk_ids)} old chunks')
                 except Exception as e:
                     self.stdout.write(self.style.WARNING(f'  Could not delete old chunks: {e}'))
-            
+
             self.stdout.write('Updating/adding documents with deterministic IDs...')
-            
+
             # Add or update documents with deterministic IDs
             existing_db.add_texts(
                 texts=chunks,
