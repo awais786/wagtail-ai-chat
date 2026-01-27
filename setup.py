@@ -13,8 +13,9 @@ setup(
     description="A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/wagtail-rag",
-    packages=find_packages(),
+    url="https://github.com/awais786/wagtail-ai-chat",
+    packages=find_packages(exclude=['tests', 'tests.*']),
+    include_package_data=True,
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
