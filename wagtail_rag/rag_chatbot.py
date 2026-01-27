@@ -5,12 +5,15 @@ This module provides a RAG (Retrieval-Augmented Generation) chatbot
 that uses the indexed content from Wagtail pages.
 """
 import os
+import logging
 
 from django.conf import settings
 
+# Setup logging
+logger = logging.getLogger(__name__)
+
 try:
     from langchain_community.vectorstores import Chroma
-    from langchain_community.llms import Ollama
 except ImportError:
     raise ImportError(
         "Could not import LangChain components. "
@@ -34,12 +37,17 @@ try:
     from langchain_core.output_parsers import StrOutputParser
     USE_LCEL = True
 except ImportError:
+    ChatPromptTemplate = None
+    RunnablePassthrough = None
+    StrOutputParser = None
     try:
         from langchain.prompts import PromptTemplate
         from langchain.chains import RetrievalQA
         USE_LCEL = False
     except ImportError:
         # Fallback - use simple pattern
+        PromptTemplate = None
+        RetrievalQA = None
         USE_LCEL = None
 
 # Try to import MultiQueryRetriever
@@ -54,6 +62,19 @@ except ImportError:
         MULTI_QUERY_AVAILABLE = False
         MultiQueryRetriever = None
 
+# Import Document class for creating document objects
+try:
+    from langchain_core.documents import Document
+except ImportError:
+    try:
+        from langchain.schema import Document
+    except ImportError:
+        # Fallback: create a simple Document class
+        class Document:
+            def __init__(self, page_content, metadata=None):
+                self.page_content = page_content
+                self.metadata = metadata or {}
+
 # Import Wagtail for hybrid search
 try:
     from wagtail.models import Page
@@ -61,6 +82,9 @@ try:
 except ImportError:
     WAGTAIL_AVAILABLE = False
     Page = None
+
+# Import LLM provider factory
+from .llm_providers import get_llm
 
 
 class RAGChatBot:
@@ -71,7 +95,9 @@ class RAGChatBot:
         collection_name=None,
         model_name=None,
         persist_directory=None,
-        metadata_filter=None
+        metadata_filter=None,
+        llm_provider=None,
+        llm_kwargs=None
     ):
         """
         Initialize the RAG Chatbot.
@@ -81,6 +107,8 @@ class RAGChatBot:
             model_name: Name of the LLM model (default: from settings or 'mistral')
             persist_directory: Path to ChromaDB persistence directory (default: from settings)
             metadata_filter: Dict to filter by metadata (e.g., {'model': 'BreadPage'}) (default: None)
+            llm_provider: LLM provider type ('ollama', 'openai', 'anthropic', etc.) (default: from settings or 'ollama')
+            llm_kwargs: Additional kwargs to pass to LLM initialization (default: None)
         """
         # Get collection name from settings or use default
         if collection_name is None:
@@ -128,8 +156,13 @@ class RAGChatBot:
             embedding_function=self.embeddings
         )
         
-        # Initialize LLM (using Ollama - make sure Ollama is running)
-        self.llm = Ollama(model=self.model_name)
+        # Initialize LLM using the factory function
+        llm_kwargs = llm_kwargs or {}
+        self.llm = get_llm(
+            provider=llm_provider,
+            model_name=self.model_name,
+            **llm_kwargs
+        )
         
         # Create base retriever with configurable parameters
         k_value = getattr(settings, 'WAGTAIL_RAG_RETRIEVE_K', 8)
@@ -250,6 +283,15 @@ Answer: """
                 try:
                     vector_docs = self.vectorstore.similarity_search(query, k=self.k_value)
                     all_docs.extend(vector_docs)
+                    
+                    # Track seen URLs/IDs from fallback results
+                    for doc in vector_docs:
+                        url = doc.metadata.get('url', '')
+                        doc_id = doc.metadata.get('id')
+                        if url:
+                            seen_urls.add(url)
+                        if doc_id:
+                            seen_ids.add(doc_id)
                 except Exception:
                     pass
             
@@ -266,8 +308,7 @@ Answer: """
                         if page_url in seen_urls or page_id in seen_ids:
                             continue
                         
-                        # Extract text from page
-                        from langchain_core.documents import Document
+                        # Extract text from page (Document imported at top of file)
                         try:
                             # Try to get text content
                             page_text = ""
@@ -507,7 +548,7 @@ Answer: """
         ]
 
 
-def get_chatbot(collection_name=None, model_name=None, metadata_filter=None):
+def get_chatbot(collection_name=None, model_name=None, metadata_filter=None, llm_provider=None, llm_kwargs=None):
     """
     Convenience function to get a RAG chatbot instance.
     
@@ -515,6 +556,8 @@ def get_chatbot(collection_name=None, model_name=None, metadata_filter=None):
         collection_name: Name of the ChromaDB collection (default: from settings)
         model_name: Name of the LLM model (default: from settings)
         metadata_filter: Dict to filter by metadata (e.g., {'model': 'BreadPage'}) (default: None)
+        llm_provider: LLM provider type ('ollama', 'openai', 'anthropic', etc.) (default: from settings)
+        llm_kwargs: Additional kwargs to pass to LLM initialization (default: None)
         
     Returns:
         RAGChatBot instance
@@ -522,6 +565,8 @@ def get_chatbot(collection_name=None, model_name=None, metadata_filter=None):
     return RAGChatBot(
         collection_name=collection_name,
         model_name=model_name,
-        metadata_filter=metadata_filter
+        metadata_filter=metadata_filter,
+        llm_provider=llm_provider,
+        llm_kwargs=llm_kwargs
     )
 

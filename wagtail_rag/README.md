@@ -77,8 +77,25 @@ WAGTAIL_RAG_COLLECTION_NAME = 'wagtail_rag'
 # ChromaDB persistence directory
 WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'chroma_db')
 
+# LLM Provider (default: 'ollama')
+# Options: 'ollama', 'openai', 'anthropic', 'huggingface', 'google', 'cohere', 'custom'
+WAGTAIL_RAG_LLM_PROVIDER = 'ollama'
+
 # LLM model name (default: 'mistral')
+# Model name depends on provider:
+#   - Ollama: 'mistral', 'llama2', 'phi', 'gemma', etc.
+#   - OpenAI: 'gpt-4', 'gpt-3.5-turbo', 'gpt-4-turbo-preview', etc.
+#   - Anthropic: 'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'
+#   - Google: 'gemini-pro', 'gemini-pro-vision'
+#   - HuggingFace: model ID from HuggingFace Hub
 WAGTAIL_RAG_MODEL_NAME = 'mistral'
+
+# API Keys for cloud providers (set in environment variables or here)
+# OPENAI_API_KEY = 'your-openai-key'
+# ANTHROPIC_API_KEY = 'your-anthropic-key'
+# GOOGLE_API_KEY = 'your-google-key'
+# COHERE_API_KEY = 'your-cohere-key'
+# HUGGINGFACE_API_KEY = 'your-hf-key'
 
 # Embedding model (default: 'sentence-transformers/all-MiniLM-L6-v2')
 WAGTAIL_RAG_EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2'
@@ -202,19 +219,129 @@ for result in results:
 
 - **Vector Store**: ChromaDB for storing embeddings
 - **Embeddings**: HuggingFace sentence transformers
-- **LLM**: Ollama (local LLM, supports Mistral, Llama2, etc.)
+- **LLM**: Multiple providers supported (Ollama, OpenAI, Anthropic, HuggingFace, Google, Cohere, or custom)
 - **Framework**: LangChain for orchestration
 - **Search**: Hybrid search (ChromaDB + Wagtail full-text)
+
+## LLM Provider Configuration
+
+### Ollama (Default - Local LLM)
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'ollama'
+WAGTAIL_RAG_MODEL_NAME = 'mistral'  # or 'llama2', 'phi', 'gemma', etc.
+
+# Install: pip install langchain-community ollama
+# Setup: ollama serve && ollama pull mistral
+```
+
+### OpenAI
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'openai'
+WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # or 'gpt-3.5-turbo', 'gpt-4-turbo-preview'
+OPENAI_API_KEY = 'your-api-key'  # or set OPENAI_API_KEY environment variable
+
+# Install: pip install langchain-openai
+```
+
+### Anthropic (Claude)
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'anthropic'
+WAGTAIL_RAG_MODEL_NAME = 'claude-3-sonnet-20240229'  # or 'claude-3-opus-20240229', 'claude-3-haiku-20240307'
+ANTHROPIC_API_KEY = 'your-api-key'  # or set ANTHROPIC_API_KEY environment variable
+
+# Install: pip install langchain-anthropic
+```
+
+### Google (Gemini)
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'google'  # or 'gemini'
+WAGTAIL_RAG_MODEL_NAME = 'gemini-pro'
+GOOGLE_API_KEY = 'your-api-key'  # or set GOOGLE_API_KEY environment variable
+
+# Install: pip install langchain-google-genai
+```
+
+### HuggingFace
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'huggingface'  # or 'hf'
+WAGTAIL_RAG_MODEL_NAME = 'meta-llama/Llama-2-7b-chat-hf'  # or any HF model ID
+HUGGINGFACE_API_KEY = 'your-api-key'  # Optional, for private models
+
+# Install: pip install langchain-huggingface transformers
+```
+
+### Cohere
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'cohere'
+WAGTAIL_RAG_MODEL_NAME = 'command'  # or 'command-light', 'command-nightly'
+COHERE_API_KEY = 'your-api-key'  # or set COHERE_API_KEY environment variable
+
+# Install: pip install langchain-community cohere
+```
+
+### Custom LLM
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'custom'
+WAGTAIL_RAG_CUSTOM_LLM_FACTORY = lambda model_name, **kwargs: YourCustomLLM(model=model_name, **kwargs)
+
+# YourCustomLLM should be a LangChain-compatible LLM/ChatModel
+```
+
+### Using Different Providers in Code
+
+```python
+from wagtail_rag.rag_chatbot import get_chatbot
+
+# Use OpenAI
+chatbot = get_chatbot(llm_provider='openai', model_name='gpt-4')
+
+# Use Anthropic
+chatbot = get_chatbot(llm_provider='anthropic', model_name='claude-3-sonnet-20240229')
+
+# Use with custom kwargs
+chatbot = get_chatbot(
+    llm_provider='openai',
+    model_name='gpt-4',
+    llm_kwargs={'temperature': 0.7, 'max_tokens': 1000}
+)
+```
+
+### Using Different Providers via API
+
+```bash
+curl -X POST http://localhost:8000/api/rag/chat/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What types of bread do you have?",
+    "provider": "openai",
+    "model": "gpt-4",
+    "llm_kwargs": {"temperature": 0.7}
+  }'
+```
 
 ## Requirements
 
 - Python 3.8+
 - Django 3.2+
 - Wagtail 4.0+
-- Ollama (for local LLM)
 - ChromaDB
 - LangChain
 - HuggingFace embeddings
+
+**LLM Provider Requirements** (install based on your choice):
+- **Ollama**: `pip install langchain-community ollama` (for local LLM)
+- **OpenAI**: `pip install langchain-openai`
+- **Anthropic**: `pip install langchain-anthropic`
+- **Google**: `pip install langchain-google-genai`
+- **HuggingFace**: `pip install langchain-huggingface transformers`
+- **Cohere**: `pip install langchain-community cohere`
 
 ## License
 
