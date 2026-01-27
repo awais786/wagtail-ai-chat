@@ -30,17 +30,27 @@ except ImportError:
             "Please install langchain-community: pip install langchain-community"
         )
 
+# Import embedding factory
 try:
-    from langchain_huggingface import HuggingFaceEmbeddings
+    from wagtail_rag.embedding_providers import get_embeddings
 except ImportError:
+    # Fallback for older installations
     try:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
+        from langchain_huggingface import HuggingFaceEmbeddings
+        def get_embeddings(provider=None, model_name=None, **kwargs):
+            if provider and provider.lower() not in ('huggingface', 'hf', None):
+                raise ValueError(f"Only HuggingFace embeddings available. Requested: {provider}")
+            return HuggingFaceEmbeddings(model_name=model_name or 'sentence-transformers/all-MiniLM-L6-v2', **kwargs)
     except ImportError:
         try:
-            from langchain.embeddings import HuggingFaceEmbeddings
+            from langchain_community.embeddings import HuggingFaceEmbeddings
+            def get_embeddings(provider=None, model_name=None, **kwargs):
+                if provider and provider.lower() not in ('huggingface', 'hf', None):
+                    raise ValueError(f"Only HuggingFace embeddings available. Requested: {provider}")
+                return HuggingFaceEmbeddings(model_name=model_name or 'sentence-transformers/all-MiniLM-L6-v2', **kwargs)
         except ImportError:
             raise ImportError(
-                "Could not import HuggingFaceEmbeddings. "
+                "Could not import embeddings. "
                 "Please install langchain-huggingface or langchain-community"
             )
 
@@ -503,23 +513,40 @@ class Command(BaseCommand):
         return pages, metadata
 
     def handle(self, *args, **options):
-        model_names = options['models']
+        # Get values from command line args, or fall back to settings, or use defaults
+        model_names = options['models'] or getattr(settings, 'WAGTAIL_RAG_MODELS', None)
         exclude_models = options['exclude_models'] or []
         model_fields_arg = options['model_fields'] or []
         important_fields = options['important_fields'] or []
-        chunk_size = options['chunk_size']
-        chunk_overlap = options['chunk_overlap']
+        chunk_size = options['chunk_size'] or getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 1000)
+        chunk_overlap = options['chunk_overlap'] or getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 200)
         collection_name = options['collection_name']
         reset = options['reset']
         reset_only = options['reset_only']
         page_id = options['page_id']
-
+        
+        # Get default exclude models from settings
+        default_excludes = getattr(
+            settings,
+            'WAGTAIL_RAG_EXCLUDE_MODELS',
+            ['wagtailcore.Page', 'wagtailcore.Site']
+        )
+        exclude_models = list(set(exclude_models + default_excludes))
+        
+        # Get default important fields from settings if not provided via CLI
+        if not important_fields:
+            important_fields = getattr(settings, 'WAGTAIL_RAG_IMPORTANT_FIELDS', [])
+        
+        # Get default model-specific fields from settings if not provided via CLI
+        if not model_fields_arg:
+            model_fields_arg = getattr(settings, 'WAGTAIL_RAG_MODEL_FIELDS', [])
+        
         # Parse model-specific fields
         model_fields_map = self._parse_model_fields(model_fields_arg)
-
+        
         if page_id:
             self.stdout.write(f'Re-indexing specific page ID: {page_id}')
-
+        
         if model_fields_map:
             self.stdout.write(f'Model-specific important fields: {model_fields_map}')
         if important_fields:
@@ -532,23 +559,70 @@ class Command(BaseCommand):
                 'WAGTAIL_RAG_COLLECTION_NAME',
                 'wagtail_rag'
             )
-
-        # Add default exclusions
-        default_excludes = getattr(
-            settings,
-            'WAGTAIL_RAG_EXCLUDE_MODELS',
-            ['wagtailcore.Page', 'wagtailcore.Site']
-        )
-        exclude_models = list(set(exclude_models + default_excludes))
-
+        
+        # Display configuration being used
+        self.stdout.write('=' * 60)
+        self.stdout.write(self.style.SUCCESS('Wagtail RAG Configuration:'))
+        self.stdout.write('=' * 60)
+        
+        # Models configuration
+        if model_names:
+            self.stdout.write(f'Models to index: {", ".join(model_names)}')
+        else:
+            self.stdout.write('Models to index: ALL Page models')
+        
+        if exclude_models:
+            self.stdout.write(f'Excluded models: {", ".join(exclude_models)}')
+        
+        # Chunking configuration
+        self.stdout.write(f'Chunk size: {chunk_size}')
+        self.stdout.write(f'Chunk overlap: {chunk_overlap}')
+        
+        # Collection configuration
+        self.stdout.write(f'Collection name: {collection_name}')
+        
+        # Important fields
+        if important_fields:
+            self.stdout.write(f'Global important fields: {", ".join(important_fields)}')
+        if model_fields_map:
+            self.stdout.write(f'Model-specific fields: {model_fields_map}')
+        
+        # Embedding configuration (used for indexing - converts text to vectors)
+        embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
+        embedding_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None)
+        self.stdout.write(f'Embedding provider: {embedding_provider} (used for vector search)')
+        if embedding_model:
+            self.stdout.write(f'Embedding model: {embedding_model}')
+        else:
+            self.stdout.write(f'Embedding model: default for {embedding_provider}')
+        
+        # LLM Provider configuration (used for querying - generates answers)
+        llm_provider = getattr(settings, 'WAGTAIL_RAG_LLM_PROVIDER', 'ollama')
+        llm_model = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None)
+        self.stdout.write(f'LLM Provider: {llm_provider} (used when querying chatbot)')
+        if llm_model:
+            self.stdout.write(f'LLM Model: {llm_model}')
+        else:
+            # Show default based on provider
+            provider_defaults = {
+                'ollama': 'mistral',
+                'openai': 'gpt-4',
+                'anthropic': 'claude-3-sonnet-20240229',
+            }
+            default = provider_defaults.get(llm_provider, 'see settings')
+            self.stdout.write(f'LLM Model: {default} (default for {llm_provider})')
+        
+        self.stdout.write('=' * 60)
+        self.stdout.write('')
+        
         self.stdout.write('Starting RAG index building...')
-
+        
         # Get pages to index
         if model_names:
             self.stdout.write(f'Extracting data from specified models: {", ".join(model_names)}')
         else:
             self.stdout.write('Extracting data from all Page models...')
-
+        
         if exclude_models:
             self.stdout.write(f'Excluding models: {", ".join(exclude_models)}')
 
@@ -616,13 +690,15 @@ class Command(BaseCommand):
 
         # Initialize embeddings
         self.stdout.write('Initializing embeddings...')
-        embedding_model = getattr(
-            settings,
-            'WAGTAIL_RAG_EMBEDDING_MODEL',
-            'sentence-transformers/all-MiniLM-L6-v2'
-        )
-        self.stdout.write(f'Using embedding model: {embedding_model}')
-        embeddings = HuggingFaceEmbeddings(
+        embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
+        embedding_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None)
+        self.stdout.write(f'Embedding provider: {embedding_provider}')
+        if embedding_model:
+            self.stdout.write(f'Embedding model: {embedding_model}')
+        else:
+            self.stdout.write(f'Embedding model: default for {embedding_provider}')
+        embeddings = get_embeddings(
+            provider=embedding_provider,
             model_name=embedding_model
         )
 
@@ -634,14 +710,43 @@ class Command(BaseCommand):
         )
         os.makedirs(persist_directory, exist_ok=True)
 
+        # Check if collection exists and warn about embedding dimension mismatch
+        try:
+            existing_db = Chroma(
+                persist_directory=persist_directory,
+                collection_name=collection_name,
+                embedding_function=embeddings
+            )
+            # Try to get collection info to check dimensions
+            try:
+                # Get a sample to check dimensions
+                sample = existing_db.get(limit=1)
+                if sample and sample.get('ids'):
+                    # Collection exists - check if we need to reset
+                    if not reset and not reset_only:
+                        self.stdout.write(
+                            self.style.WARNING(
+                                f'\n⚠️  WARNING: Collection "{collection_name}" already exists.\n'
+                                f'   If you changed embedding providers/models, you MUST use --reset\n'
+                                f'   to avoid dimension mismatch errors.\n'
+                                f'   Current embedding: {embedding_provider} / {embedding_model or "default"}\n'
+                            )
+                        )
+            except Exception:
+                # Collection might be empty or have issues, continue
+                pass
+        except Exception:
+            # Collection doesn't exist yet, that's fine
+            pass
+
         # Reset collection if requested (need embeddings for Chroma connection)
         if reset or reset_only:
-            embedding_model = getattr(
-                settings,
-                'WAGTAIL_RAG_EMBEDDING_MODEL',
-                'sentence-transformers/all-MiniLM-L6-v2'
+            embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
+            embedding_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None)
+            temp_embeddings = get_embeddings(
+                provider=embedding_provider,
+                model_name=embedding_model
             )
-            temp_embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
             self.stdout.write(f'Resetting collection: {collection_name}')
             try:
                 existing_db = Chroma(
@@ -661,7 +766,7 @@ class Command(BaseCommand):
 
         # Create/update vector store with deterministic IDs
         self.stdout.write(f'Storing chunks in ChromaDB (collection: {collection_name})...')
-
+        
         # Check if collection exists to determine if we're updating or creating
         try:
             existing_db = Chroma(
@@ -670,6 +775,25 @@ class Command(BaseCommand):
                 embedding_function=embeddings
             )
             # Collection exists - we'll update/add documents
+            # Test if we can actually use it (check dimension compatibility)
+            try:
+                # Try to get collection count to verify compatibility
+                existing_db._collection.count()
+            except Exception as e:
+                error_msg = str(e)
+                if 'dimension' in error_msg.lower() or 'embedding' in error_msg.lower():
+                    self.stdout.write(
+                        self.style.ERROR(
+                            f'\n❌ ERROR: Embedding dimension mismatch!\n'
+                            f'   The existing collection was created with a different embedding model.\n'
+                            f'   You MUST reset the collection first:\n'
+                            f'   python manage.py build_rag_index --reset\n'
+                            f'   Error: {error_msg}\n'
+                        )
+                    )
+                    return
+                else:
+                    raise
             if page_id:
                 # For single page updates, delete old chunks first
                 self.stdout.write(f'Deleting old chunks for page ID {page_id}...')
@@ -694,13 +818,44 @@ class Command(BaseCommand):
             self.stdout.write('Updating/adding documents with deterministic IDs...')
 
             # Add or update documents with deterministic IDs
-            existing_db.add_texts(
-                texts=chunks,
-                metadatas=chunk_metadatas,
-                ids=chunk_ids
-            )
-            vectorstore = existing_db
-        except Exception:
+            try:
+                existing_db.add_texts(
+                    texts=chunks,
+                    metadatas=chunk_metadatas,
+                    ids=chunk_ids
+                )
+                vectorstore = existing_db
+            except Exception as e:
+                error_msg = str(e)
+                if 'dimension' in error_msg.lower() or 'embedding' in error_msg.lower():
+                    self.stdout.write(
+                        self.style.ERROR(
+                            f'\n❌ ERROR: Embedding dimension mismatch!\n'
+                            f'   The collection was created with a different embedding model.\n'
+                            f'   Current embedding: {embedding_provider} / {embedding_model or "default"}\n'
+                            f'   You MUST reset the collection first:\n'
+                            f'   python manage.py build_rag_index --reset\n'
+                            f'   Error: {error_msg}\n'
+                        )
+                    )
+                    return
+                else:
+                    raise
+        except Exception as e:
+            error_msg = str(e)
+            # Check if it's a dimension mismatch error
+            if 'dimension' in error_msg.lower() or 'embedding' in error_msg.lower():
+                self.stdout.write(
+                    self.style.ERROR(
+                        f'\n❌ ERROR: Embedding dimension mismatch!\n'
+                        f'   The collection was created with a different embedding model.\n'
+                        f'   Current embedding: {embedding_provider} / {embedding_model or "default"}\n'
+                        f'   You MUST reset the collection first:\n'
+                        f'   python manage.py build_rag_index --reset\n'
+                        f'   Error: {error_msg}\n'
+                    )
+                )
+                return
             # Collection doesn't exist - create new one
             self.stdout.write('Creating new collection...')
             vectorstore = Chroma.from_texts(

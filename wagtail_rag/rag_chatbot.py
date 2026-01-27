@@ -20,16 +20,7 @@ except ImportError:
         "Please install langchain-community: pip install langchain-community"
     )
 
-try:
-    from langchain_huggingface import HuggingFaceEmbeddings
-except ImportError:
-    try:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
-    except ImportError:
-        raise ImportError(
-            "Could not import HuggingFaceEmbeddings. "
-            "Please install langchain-huggingface or langchain-community"
-        )
+# Embeddings will be imported via embedding_providers factory
 
 try:
     from langchain_core.prompts import ChatPromptTemplate
@@ -75,16 +66,27 @@ except ImportError:
                 self.page_content = page_content
                 self.metadata = metadata or {}
 
-# Import Wagtail for hybrid search
-try:
-    from wagtail.models import Page
-    WAGTAIL_AVAILABLE = True
-except ImportError:
-    WAGTAIL_AVAILABLE = False
-    Page = None
-
-# Import LLM provider factory
+# Import provider factories
 from .llm_providers import get_llm
+from .embedding_providers import get_embeddings
+
+
+def _is_wagtail_available():
+    """Check if Wagtail is available (lazy import to avoid AppRegistryNotReady)."""
+    try:
+        from wagtail.models import Page
+        return True
+    except (ImportError, Exception):
+        return False
+
+
+def _get_wagtail_page():
+    """Get Wagtail Page model (lazy import to avoid AppRegistryNotReady)."""
+    try:
+        from wagtail.models import Page
+        return Page
+    except (ImportError, Exception):
+        return None
 
 
 class RAGChatBot:
@@ -118,14 +120,6 @@ class RAGChatBot:
                 'wagtail_rag'
             )
         
-        # Get model name from settings or use default
-        if model_name is None:
-            model_name = getattr(
-                settings,
-                'WAGTAIL_RAG_MODEL_NAME',
-                'mistral'  # Default to mistral (change to llama2 if preferred)
-            )
-        
         # Get persist directory from settings or use default
         if persist_directory is None:
             persist_directory = getattr(
@@ -134,18 +128,40 @@ class RAGChatBot:
                 os.path.join(settings.BASE_DIR, 'chroma_db')
             )
         
+        # Get LLM provider from settings if not provided (needed to determine model default)
+        if llm_provider is None:
+            llm_provider = getattr(settings, 'WAGTAIL_RAG_LLM_PROVIDER', 'ollama')
+        
+        # Get model name from settings or use provider-specific default
+        # Don't set a default here - let get_llm() handle provider-specific defaults
+        if model_name is None:
+            model_name = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None)
+            # If still None, get_llm() will use provider-specific defaults
+        
         self.collection_name = collection_name
         self.persist_directory = persist_directory
-        self.model_name = model_name
+        self.model_name = model_name  # May be None, get_llm() will set appropriate default
         self.metadata_filter = metadata_filter or {}
         
-        # Initialize embeddings
+        # Get embedding provider from settings if not provided
+        embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
         embedding_model = getattr(
             settings,
             'WAGTAIL_RAG_EMBEDDING_MODEL',
-            'sentence-transformers/all-MiniLM-L6-v2'
+            None  # Will use provider default
         )
-        self.embeddings = HuggingFaceEmbeddings(
+        
+        # Log the configuration being used
+        logger.info(f"RAGChatBot initialized with:")
+        logger.info(f"  - Collection: {collection_name}")
+        logger.info(f"  - LLM Provider: {llm_provider}")
+        logger.info(f"  - LLM Model: {self.model_name}")
+        logger.info(f"  - Embedding Provider: {embedding_provider}")
+        logger.info(f"  - Embedding Model: {embedding_model or 'default for provider'}")
+        
+        # Initialize embeddings using the factory function
+        self.embeddings = get_embeddings(
+            provider=embedding_provider,
             model_name=embedding_model
         )
         
@@ -157,12 +173,20 @@ class RAGChatBot:
         )
         
         # Initialize LLM using the factory function
+        # Pass model_name=None if not set, so get_llm() can use provider-specific defaults
         llm_kwargs = llm_kwargs or {}
+        self.llm_provider = llm_provider  # Store for reference
         self.llm = get_llm(
             provider=llm_provider,
-            model_name=self.model_name,
+            model_name=self.model_name,  # May be None, get_llm() will use provider default
             **llm_kwargs
         )
+        # Get the actual model name that was used (in case get_llm() set a default)
+        # We can't easily get it back from the LLM object, so we'll log what we know
+        actual_model = self.model_name or f"default for {llm_provider}"
+        logger.info(f"LLM initialized successfully: {llm_provider} / {actual_model}")
+        # Update self.model_name for reference (though it may still be None)
+        # The actual model is determined by get_llm() internally
         
         # Create base retriever with configurable parameters
         k_value = getattr(settings, 'WAGTAIL_RAG_RETRIEVE_K', 8)
@@ -194,7 +218,7 @@ class RAGChatBot:
         self.k_value = k_value
         
         # Enable hybrid search (Wagtail + ChromaDB)
-        self.use_hybrid_search = getattr(settings, 'WAGTAIL_RAG_USE_HYBRID_SEARCH', True) and WAGTAIL_AVAILABLE
+        self.use_hybrid_search = getattr(settings, 'WAGTAIL_RAG_USE_HYBRID_SEARCH', True) and _is_wagtail_available()
         
         # Create prompt template
         prompt_template_str = getattr(
@@ -298,6 +322,9 @@ Answer: """
             # 2. Get documents from Wagtail search (hybrid search)
             if self.use_hybrid_search:
                 try:
+                    Page = _get_wagtail_page()
+                    if Page is None:
+                        raise ImportError("Wagtail not available")
                     wagtail_results = Page.objects.live().search(query)
                     # Convert Wagtail search results to Document format
                     for page in wagtail_results[:10]:  # Limit to top 10 from Wagtail
@@ -569,4 +596,3 @@ def get_chatbot(collection_name=None, model_name=None, metadata_filter=None, llm
         llm_provider=llm_provider,
         llm_kwargs=llm_kwargs
     )
-

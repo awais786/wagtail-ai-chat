@@ -30,27 +30,72 @@ def get_llm(provider=None, model_name=None, **kwargs):
     
     provider = provider.lower()
     
+    # Provider-specific defaults
+    provider_defaults = {
+        'ollama': 'mistral',
+        'openai': 'gpt-4',
+        'anthropic': 'claude-3-sonnet-20240229',
+        'claude': 'claude-3-sonnet-20240229',
+        'google': 'gemini-pro',
+        'gemini': 'gemini-pro',
+        'cohere': 'command',
+        'huggingface': None,  # No default, must specify
+        'hf': None,  # No default, must specify
+    }
+    default_model = provider_defaults.get(provider)
+    
+    # Model validation lists
+    ollama_models = ['mistral', 'llama2', 'phi', 'gemma', 'codellama', 'neural-chat', 'llama', 'orca']
+    openai_models = ['gpt-4', 'gpt-3.5-turbo', 'gpt-4-turbo', 'gpt-3.5']
+    
     # Set default model based on provider if not specified
     if model_name is None:
-        # Provider-specific defaults
-        provider_defaults = {
-            'ollama': 'mistral',
-            'openai': 'gpt-4',
-            'anthropic': 'claude-3-sonnet-20240229',
-            'claude': 'claude-3-sonnet-20240229',
-            'google': 'gemini-pro',
-            'gemini': 'gemini-pro',
-            'cohere': 'command',
-            'huggingface': None,  # No default, must specify
-            'hf': None,  # No default, must specify
-        }
-        default_model = provider_defaults.get(provider)
         if default_model:
-            model_name = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', default_model)
+            # Get model from settings, but if it's None, use provider default
+            settings_model = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None)
+            
+            # Check if settings model is appropriate for the provider
+            if settings_model:
+                # If provider is OpenAI but model is an Ollama model, use provider default
+                if provider == 'openai' and settings_model.lower() in ollama_models:
+                    logger.warning(
+                        f"Model '{settings_model}' from settings is an Ollama model, but provider is 'openai'. "
+                        f"Using provider default '{default_model}' instead. "
+                        f"Set WAGTAIL_RAG_MODEL_NAME to 'gpt-4' or 'gpt-3.5-turbo' to use OpenAI."
+                    )
+                    model_name = default_model
+                # If provider is Ollama but model is an OpenAI model, use provider default
+                elif provider == 'ollama' and any(settings_model.lower().startswith(m) for m in openai_models):
+                    logger.warning(
+                        f"Model '{settings_model}' from settings is an OpenAI model, but provider is 'ollama'. "
+                        f"Using provider default '{default_model}' instead. "
+                        f"Set WAGTAIL_RAG_MODEL_NAME to 'mistral', 'llama2', etc. to use Ollama."
+                    )
+                    model_name = default_model
+                else:
+                    # Model seems appropriate for provider, use it
+                    model_name = settings_model
+            else:
+                # No model in settings, use provider default
+                model_name = default_model
         else:
             model_name = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None)
             if not model_name:
                 raise ValueError(f"model_name must be specified for provider '{provider}'")
+    else:
+        # model_name was explicitly passed - validate it matches the provider
+        if provider == 'openai' and model_name.lower() in ollama_models:
+            logger.warning(
+                f"Model '{model_name}' is an Ollama model, but provider is 'openai'. "
+                f"Using provider default '{default_model}' instead."
+            )
+            model_name = default_model
+        elif provider == 'ollama' and any(model_name.lower().startswith(m) for m in openai_models):
+            logger.warning(
+                f"Model '{model_name}' is an OpenAI model, but provider is 'ollama'. "
+                f"Using provider default '{default_model}' instead."
+            )
+            model_name = default_model
     
     logger.info(f"Initializing LLM with provider='{provider}', model='{model_name}'")
     
