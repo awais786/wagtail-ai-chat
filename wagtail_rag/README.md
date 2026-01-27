@@ -1,6 +1,6 @@
-# Wagtail RAG
+# Wagtail RAG Chatbot
 
-A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. This Django app provides a complete RAG solution that indexes your Wagtail pages into ChromaDB and provides a chatbot interface using LangChain and Ollama.
+A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. This Django app provides a complete RAG solution that indexes your Wagtail pages into ChromaDB and provides a chatbot interface using LangChain with support for multiple LLM and embedding providers.
 
 ## Features
 
@@ -10,25 +10,26 @@ A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. Th
 - **Fuzzy Matching**: Handles typos and partial matches in search queries
 - **Metadata Filtering**: Filter search results by page model, app, or custom metadata
 - **Deterministic IDs**: Enables efficient updates and single-page re-indexing
+- **Multiple LLM Providers**: Support for OpenAI, Anthropic, Ollama, Google, HuggingFace, Cohere, and custom providers
+- **Multiple Embedding Providers**: Support for OpenAI, HuggingFace, Cohere, Google, Sentence Transformers, and custom providers
 - **Generic & Reusable**: Works with any Wagtail project without hardcoding model names
+- **Configurable via Django Settings**: All options configurable through Django settings (no command-line args required)
 
 ## Installation
 
-1. **Install the package** (or copy the `wagtail_rag` directory to your project):
+### 1. Install the Package
 
-```bash
-pip install wagtail-rag
-```
-
-Or if installing from source:
-
+**From source:**
 ```bash
 cd wagtail_rag
 pip install -e .
 ```
 
-2. **Add to INSTALLED_APPS** in your Django settings:
+**Or copy the `wagtail_rag` directory to your project**
 
+### 2. Add to INSTALLED_APPS
+
+In your Django `settings.py`:
 ```python
 INSTALLED_APPS = [
     # ... other apps
@@ -36,39 +37,86 @@ INSTALLED_APPS = [
 ]
 ```
 
-3. **Install dependencies**:
+### 3. Install Dependencies
 
+**Core dependencies:**
 ```bash
-pip install langchain langchain-community langchain-text-splitters langchain-huggingface chromadb beautifulsoup4 ollama
+pip install langchain langchain-community langchain-text-splitters chromadb beautifulsoup4
 ```
 
-4. **Install and start Ollama** (for local LLM):
+**LLM Provider dependencies** (install based on your choice):
+- **Ollama** (default, local): `pip install langchain-community ollama`
+- **OpenAI**: `pip install langchain-openai`
+- **Anthropic**: `pip install langchain-anthropic`
+- **Google**: `pip install langchain-google-genai`
+- **HuggingFace**: `pip install langchain-huggingface transformers`
+- **Cohere**: `pip install langchain-community cohere`
 
-```bash
-# Install Ollama
-# macOS: brew install ollama
-# Linux: curl -fsSL https://ollama.com/install.sh | sh
+**Embedding Provider dependencies** (install based on your choice):
+- **HuggingFace** (default, local): `pip install langchain-huggingface sentence-transformers`
+- **OpenAI**: `pip install langchain-openai`
+- **Cohere**: `pip install langchain-community cohere`
+- **Google**: `pip install langchain-google-genai`
+- **Sentence Transformers**: `pip install sentence-transformers`
 
-# Start Ollama service
-ollama serve
+### 4. Add URL Configuration (Optional, for API endpoint)
 
-# Pull a model (e.g., mistral)
-ollama pull mistral
-```
-
-5. **Add URL configuration** (optional, for API endpoint):
-
+In your main `urls.py`:
 ```python
-# In your main urls.py
 urlpatterns = [
     # ... other patterns
     path('', include('wagtail_rag.urls')),
 ]
 ```
 
-## Configuration
+## Quick Start
+
+### 1. Configure Settings
 
 Add these settings to your Django `settings.py`:
+
+```python
+# LLM Configuration
+WAGTAIL_RAG_LLM_PROVIDER = 'openai'  # or 'ollama', 'anthropic', 'google', etc.
+WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Provider-specific model name
+OPENAI_API_KEY = 'sk-...'  # Required for OpenAI (or set as environment variable)
+
+# Embedding Configuration
+WAGTAIL_RAG_EMBEDDING_PROVIDER = 'openai'  # or 'huggingface', 'cohere', etc.
+WAGTAIL_RAG_EMBEDDING_MODEL = 'text-embedding-ada-002'  # Provider-specific model
+
+# ChromaDB Configuration
+WAGTAIL_RAG_COLLECTION_NAME = 'wagtail_rag'
+WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'chroma_db')
+```
+
+### 2. Build the Index
+
+```bash
+python manage.py build_rag_index
+```
+
+### 3. Use the Chatbot
+
+**In Python:**
+```python
+from wagtail_rag.rag_chatbot import get_chatbot
+
+chatbot = get_chatbot()
+result = chatbot.query("What content is available on this site?")
+print(result['answer'])
+```
+
+**Via API:**
+```bash
+curl -X POST http://localhost:8000/api/rag/chat/ \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What content is available?"}'
+```
+
+## Configuration
+
+### Basic Settings
 
 ```python
 # ChromaDB collection name
@@ -76,29 +124,6 @@ WAGTAIL_RAG_COLLECTION_NAME = 'wagtail_rag'
 
 # ChromaDB persistence directory
 WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'chroma_db')
-
-# LLM Provider (default: 'ollama')
-# Options: 'ollama', 'openai', 'anthropic', 'huggingface', 'google', 'cohere', 'custom'
-WAGTAIL_RAG_LLM_PROVIDER = 'ollama'
-
-# LLM model name (default: 'mistral')
-# Model name depends on provider:
-#   - Ollama: 'mistral', 'llama2', 'phi', 'gemma', etc.
-#   - OpenAI: 'gpt-4', 'gpt-3.5-turbo', 'gpt-4-turbo-preview', etc.
-#   - Anthropic: 'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'
-#   - Google: 'gemini-pro', 'gemini-pro-vision'
-#   - HuggingFace: model ID from HuggingFace Hub
-WAGTAIL_RAG_MODEL_NAME = 'mistral'
-
-# API Keys for cloud providers (set in environment variables or here)
-# OPENAI_API_KEY = 'your-openai-key'
-# ANTHROPIC_API_KEY = 'your-anthropic-key'
-# GOOGLE_API_KEY = 'your-google-key'
-# COHERE_API_KEY = 'your-cohere-key'
-# HUGGINGFACE_API_KEY = 'your-hf-key'
-
-# Embedding model (default: 'sentence-transformers/all-MiniLM-L6-v2')
-WAGTAIL_RAG_EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2'
 
 # Number of documents to retrieve (default: 8)
 WAGTAIL_RAG_RETRIEVE_K = 8
@@ -108,18 +133,293 @@ WAGTAIL_RAG_USE_MULTI_QUERY = True
 
 # Enable/disable hybrid search (default: True)
 WAGTAIL_RAG_USE_HYBRID_SEARCH = True
+```
 
-# Models to exclude from indexing (default: ['wagtailcore.Page', 'wagtailcore.Site'])
-WAGTAIL_RAG_EXCLUDE_MODELS = ['wagtailcore.Page', 'wagtailcore.Site']
+### Model Indexing Configuration
 
-# Custom prompt template (optional)
-WAGTAIL_RAG_PROMPT_TEMPLATE = """You are a helpful assistant...
-"""
+```python
+# Models to index (None = index all Page models)
+WAGTAIL_RAG_MODELS = [
+    'blog.BlogPage',
+    'breads.BreadPage',
+    'products.ProductPage',
+]
+
+# Models to exclude from indexing
+WAGTAIL_RAG_EXCLUDE_MODELS = [
+    'wagtailcore.Page',
+    'wagtailcore.Site',
+    'wagtailcore.Redirect',
+]
+
+# Global important fields to emphasize in all models
+WAGTAIL_RAG_IMPORTANT_FIELDS = [
+    'bread_type',
+    'origin',
+    'category',
+    'tags',
+]
+
+# Model-specific important fields
+WAGTAIL_RAG_MODEL_FIELDS = [
+    'breads.BreadPage:bread_type,origin',
+    'blog.BlogPage:author,date_published',
+    'products.ProductPage:price,sku',
+]
+
+# Text chunking configuration
+WAGTAIL_RAG_CHUNK_SIZE = 1000  # Size of each text chunk
+WAGTAIL_RAG_CHUNK_OVERLAP = 200  # Overlap between chunks
+```
+
+### Custom Prompt Template
+
+```python
+WAGTAIL_RAG_PROMPT_TEMPLATE = """You are a helpful assistant. Use the following pieces of context from the website to answer the question accurately.
+
+Context: {context}
+
+Question: {question}
+
+Answer: """
+```
+
+## LLM Provider Configuration
+
+### Quick Reference
+
+| Provider | Setting | Default Model | Install Command | API Key Required |
+|----------|---------|--------------|-----------------|------------------|
+| **Ollama** | `'ollama'` | `'mistral'` | `pip install langchain-community ollama` | No |
+| **OpenAI** | `'openai'` | `'gpt-4'` | `pip install langchain-openai` | Yes |
+| **Anthropic** | `'anthropic'` | `'claude-3-sonnet-20240229'` | `pip install langchain-anthropic` | Yes |
+| **Google** | `'google'` | `'gemini-pro'` | `pip install langchain-google-genai` | Yes |
+| **HuggingFace** | `'huggingface'` | None (must specify) | `pip install langchain-huggingface transformers` | Optional |
+| **Cohere** | `'cohere'` | `'command'` | `pip install langchain-community cohere` | Yes |
+
+### Ollama (Default - Local LLM)
+
+**Best for**: Local development, privacy-sensitive applications, no API costs
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'ollama'
+WAGTAIL_RAG_MODEL_NAME = 'mistral'  # or 'llama2', 'phi', 'gemma'
+```
+
+**Setup:**
+```bash
+# Install Ollama
+brew install ollama  # macOS
+# or: curl -fsSL https://ollama.com/install.sh | sh  # Linux
+
+# Start Ollama service
+ollama serve
+
+# Pull a model (in another terminal)
+ollama pull mistral
+```
+
+**Pros**: Free, local, private, no API costs  
+**Cons**: Requires local resources, slower than cloud APIs
+
+### OpenAI
+
+**Best for**: Production applications, best quality, fast responses
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'openai'
+WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # or 'gpt-3.5-turbo', 'gpt-4-turbo-preview'
+OPENAI_API_KEY = 'sk-...'  # or set environment variable
+```
+
+**Available Models:**
+- `gpt-4` - Most capable (default)
+- `gpt-4-turbo-preview` - Latest GPT-4
+- `gpt-3.5-turbo` - Faster, cheaper
+
+**Pros**: Best quality, fast, reliable  
+**Cons**: API costs, requires internet
+
+### Anthropic (Claude)
+
+**Best for**: Long context, high-quality responses
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'anthropic'
+WAGTAIL_RAG_MODEL_NAME = 'claude-3-sonnet-20240229'
+ANTHROPIC_API_KEY = 'sk-ant-...'  # or set environment variable
+```
+
+**Available Models:**
+- `claude-3-opus-20240229` - Most capable
+- `claude-3-sonnet-20240229` - Balanced (recommended)
+- `claude-3-haiku-20240307` - Fastest, cheapest
+
+**Pros**: Excellent quality, long context windows  
+**Cons**: API costs, requires internet
+
+### Google (Gemini)
+
+**Best for**: Cost-effective, good quality
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'google'  # or 'gemini'
+WAGTAIL_RAG_MODEL_NAME = 'gemini-pro'
+GOOGLE_API_KEY = 'your-api-key'  # or set environment variable
+```
+
+**Available Models:**
+- `gemini-pro` - Text generation
+- `gemini-pro-vision` - Multimodal
+
+**Pros**: Good quality, competitive pricing  
+**Cons**: API costs, requires internet
+
+### HuggingFace
+
+**Best for**: Open-source models, custom deployments
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'huggingface'  # or 'hf'
+WAGTAIL_RAG_MODEL_NAME = 'meta-llama/Llama-2-7b-chat-hf'
+HUGGINGFACE_API_KEY = 'hf_...'  # Optional, for private models
+```
+
+**Available Models**: Any model from HuggingFace Hub
+
+**Pros**: Many open-source options, flexible  
+**Cons**: Varies by model, some require local GPU
+
+### Cohere
+
+**Best for**: Fast, reliable API
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'cohere'
+WAGTAIL_RAG_MODEL_NAME = 'command'  # or 'command-light', 'command-nightly'
+COHERE_API_KEY = 'your-api-key'  # or set environment variable
+```
+
+**Available Models:**
+- `command` - Standard
+- `command-light` - Faster, cheaper
+- `command-nightly` - Latest features
+
+**Pros**: Fast, reliable  
+**Cons**: API costs, requires internet
+
+### Custom LLM
+
+**Best for**: Custom deployments, proprietary models
+
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'custom'
+
+def create_custom_llm(model_name, **kwargs):
+    from langchain.llms.base import LLM
+    # Return your custom LLM implementation
+    return YourCustomLLM(model=model_name, **kwargs)
+
+WAGTAIL_RAG_CUSTOM_LLM_FACTORY = create_custom_llm
+```
+
+**Requirements**: Your custom LLM must be LangChain-compatible (implement `BaseLLM` or `BaseChatModel`)
+
+## Embedding Provider Configuration
+
+### Quick Reference
+
+| Provider | Setting | Default Model | Install Command | API Key Required |
+|----------|---------|---------------|-----------------|------------------|
+| **HuggingFace** | `'huggingface'` | `'sentence-transformers/all-MiniLM-L6-v2'` | `pip install langchain-huggingface` | No |
+| **OpenAI** | `'openai'` | `'text-embedding-ada-002'` | `pip install langchain-openai` | Yes |
+| **Cohere** | `'cohere'` | `'embed-english-v3.0'` | `pip install langchain-community cohere` | Yes |
+| **Google** | `'google'` | `'models/embedding-001'` | `pip install langchain-google-genai` | Yes |
+| **Sentence Transformers** | `'sentence-transformers'` | None (must specify) | `pip install sentence-transformers` | No |
+
+### HuggingFace (Default - Local, Free)
+
+**Best for**: Most use cases, local development, no API costs
+
+```python
+WAGTAIL_RAG_EMBEDDING_PROVIDER = 'huggingface'  # or 'hf'
+WAGTAIL_RAG_EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2'
+```
+
+**Popular Models:**
+- `sentence-transformers/all-MiniLM-L6-v2` - Fast, good quality (default)
+- `sentence-transformers/all-mpnet-base-v2` - Better quality, slower
+- `sentence-transformers/all-MiniLM-L12-v2` - Balanced
+- `intfloat/e5-large-v2` - High quality
+
+**Pros**: Free, local, private, no API costs, works offline  
+**Cons**: Requires local resources, first download takes time
+
+### OpenAI Embeddings
+
+**Best for**: Production, best quality, consistent performance
+
+```python
+WAGTAIL_RAG_EMBEDDING_PROVIDER = 'openai'
+WAGTAIL_RAG_EMBEDDING_MODEL = 'text-embedding-ada-002'  # or 'text-embedding-3-small'
+OPENAI_API_KEY = 'sk-...'  # or set environment variable
+```
+
+**Available Models:**
+- `text-embedding-ada-002` - Standard (1536 dimensions)
+- `text-embedding-3-small` - Newer, smaller (1536 dimensions)
+- `text-embedding-3-large` - Newer, larger (3072 dimensions)
+
+**Pros**: Best quality, consistent, fast  
+**Cons**: API costs (~$0.0001 per 1K tokens), requires internet
+
+### Cohere Embeddings
+
+**Best for**: Multilingual support, good quality
+
+```python
+WAGTAIL_RAG_EMBEDDING_PROVIDER = 'cohere'
+WAGTAIL_RAG_EMBEDDING_MODEL = 'embed-english-v3.0'  # or 'embed-multilingual-v3.0'
+COHERE_API_KEY = 'your-api-key'  # or set environment variable
+```
+
+**Available Models:**
+- `embed-english-v3.0` - English
+- `embed-multilingual-v3.0` - Multilingual
+- `embed-english-light-v3.0` - Faster, cheaper
+
+**Pros**: Good multilingual support, reliable  
+**Cons**: API costs, requires internet
+
+### Google Embeddings
+
+**Best for**: Google ecosystem integration
+
+```python
+WAGTAIL_RAG_EMBEDDING_PROVIDER = 'google'  # or 'gemini'
+WAGTAIL_RAG_EMBEDDING_MODEL = 'models/embedding-001'
+GOOGLE_API_KEY = 'your-api-key'  # or set environment variable
+```
+
+**Pros**: Good quality, competitive pricing  
+**Cons**: API costs, requires internet
+
+### Custom Embeddings
+
+```python
+WAGTAIL_RAG_EMBEDDING_PROVIDER = 'custom'
+
+def create_custom_embeddings(model_name, **kwargs):
+    from langchain.embeddings.base import Embeddings
+    # Return your custom Embeddings implementation
+    return YourCustomEmbeddings(model=model_name, **kwargs)
+
+WAGTAIL_RAG_CUSTOM_EMBEDDING_FACTORY = create_custom_embeddings
 ```
 
 ## Usage
 
-### 1. Build the RAG Index
+### Building the RAG Index
 
 Index your Wagtail pages:
 
@@ -127,7 +427,7 @@ Index your Wagtail pages:
 python manage.py build_rag_index
 ```
 
-**Options:**
+**Command Options:**
 
 ```bash
 # Index specific models
@@ -152,14 +452,14 @@ python manage.py build_rag_index --reset
 python manage.py build_rag_index --page-id 123
 ```
 
-### 2. Use the Chatbot
+**Note**: Command-line arguments override Django settings. If you configure everything in settings, you can just run `python manage.py build_rag_index` without arguments.
 
-**In Python code:**
+### Using the Chatbot in Python
 
 ```python
 from wagtail_rag.rag_chatbot import get_chatbot
 
-# Get chatbot instance
+# Get chatbot instance (uses settings defaults)
 chatbot = get_chatbot()
 
 # Query the chatbot
@@ -170,152 +470,34 @@ print(result['sources'])
 # Filter by model
 chatbot_filtered = get_chatbot(metadata_filter={'model': 'BreadPage'})
 result = chatbot_filtered.query("Tell me about multigrain bread")
-```
 
-**Via API endpoint:**
+# Use different provider/model
+chatbot_openai = get_chatbot(
+    llm_provider='openai',
+    model_name='gpt-4',
+    llm_kwargs={'temperature': 0.7}
+)
+result = chatbot_openai.query("What content do you have?")
 
-```bash
-curl -X POST http://localhost:8000/api/rag/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "What types of bread do you have?",
-    "model": "mistral",
-    "filter": {"model": "BreadPage"}
-  }'
-```
-
-**Search without generating response:**
-
-```python
-from wagtail_rag.rag_chatbot import get_chatbot
-
-chatbot = get_chatbot()
+# Search without generating response
 results = chatbot.search_similar("multigrain bread", k=10)
-
 for result in results:
     print(f"Title: {result['metadata']['title']}")
     print(f"Score: {result['score']}")
     print(f"Content: {result['content'][:200]}...")
 ```
 
-## How It Works
-
-1. **Indexing**: The `build_rag_index` command:
-   - Discovers all Wagtail Page models dynamically
-   - Extracts text from pages (title, body, StreamField, RichTextField, etc.)
-   - Chunks the text using RecursiveCharacterTextSplitter
-   - Generates embeddings using HuggingFace models
-   - Stores chunks in ChromaDB with deterministic IDs
-
-2. **Querying**: The chatbot:
-   - Uses MultiQueryRetriever to generate query variations
-   - Searches ChromaDB for similar chunks
-   - Optionally searches Wagtail's full-text index (hybrid search)
-   - Combines and deduplicates results
-   - Boosts documents with matching titles (handles typos)
-   - Passes context to LLM (Ollama) for answer generation
-
-## Architecture
-
-- **Vector Store**: ChromaDB for storing embeddings
-- **Embeddings**: HuggingFace sentence transformers
-- **LLM**: Multiple providers supported (Ollama, OpenAI, Anthropic, HuggingFace, Google, Cohere, or custom)
-- **Framework**: LangChain for orchestration
-- **Search**: Hybrid search (ChromaDB + Wagtail full-text)
-
-## LLM Provider Configuration
-
-### Ollama (Default - Local LLM)
-
-```python
-WAGTAIL_RAG_LLM_PROVIDER = 'ollama'
-WAGTAIL_RAG_MODEL_NAME = 'mistral'  # or 'llama2', 'phi', 'gemma', etc.
-
-# Install: pip install langchain-community ollama
-# Setup: ollama serve && ollama pull mistral
-```
-
-### OpenAI
-
-```python
-WAGTAIL_RAG_LLM_PROVIDER = 'openai'
-WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # or 'gpt-3.5-turbo', 'gpt-4-turbo-preview'
-OPENAI_API_KEY = 'your-api-key'  # or set OPENAI_API_KEY environment variable
-
-# Install: pip install langchain-openai
-```
-
-### Anthropic (Claude)
-
-```python
-WAGTAIL_RAG_LLM_PROVIDER = 'anthropic'
-WAGTAIL_RAG_MODEL_NAME = 'claude-3-sonnet-20240229'  # or 'claude-3-opus-20240229', 'claude-3-haiku-20240307'
-ANTHROPIC_API_KEY = 'your-api-key'  # or set ANTHROPIC_API_KEY environment variable
-
-# Install: pip install langchain-anthropic
-```
-
-### Google (Gemini)
-
-```python
-WAGTAIL_RAG_LLM_PROVIDER = 'google'  # or 'gemini'
-WAGTAIL_RAG_MODEL_NAME = 'gemini-pro'
-GOOGLE_API_KEY = 'your-api-key'  # or set GOOGLE_API_KEY environment variable
-
-# Install: pip install langchain-google-genai
-```
-
-### HuggingFace
-
-```python
-WAGTAIL_RAG_LLM_PROVIDER = 'huggingface'  # or 'hf'
-WAGTAIL_RAG_MODEL_NAME = 'meta-llama/Llama-2-7b-chat-hf'  # or any HF model ID
-HUGGINGFACE_API_KEY = 'your-api-key'  # Optional, for private models
-
-# Install: pip install langchain-huggingface transformers
-```
-
-### Cohere
-
-```python
-WAGTAIL_RAG_LLM_PROVIDER = 'cohere'
-WAGTAIL_RAG_MODEL_NAME = 'command'  # or 'command-light', 'command-nightly'
-COHERE_API_KEY = 'your-api-key'  # or set COHERE_API_KEY environment variable
-
-# Install: pip install langchain-community cohere
-```
-
-### Custom LLM
-
-```python
-WAGTAIL_RAG_LLM_PROVIDER = 'custom'
-WAGTAIL_RAG_CUSTOM_LLM_FACTORY = lambda model_name, **kwargs: YourCustomLLM(model=model_name, **kwargs)
-
-# YourCustomLLM should be a LangChain-compatible LLM/ChatModel
-```
-
-### Using Different Providers in Code
-
-```python
-from wagtail_rag.rag_chatbot import get_chatbot
-
-# Use OpenAI
-chatbot = get_chatbot(llm_provider='openai', model_name='gpt-4')
-
-# Use Anthropic
-chatbot = get_chatbot(llm_provider='anthropic', model_name='claude-3-sonnet-20240229')
-
-# Use with custom kwargs
-chatbot = get_chatbot(
-    llm_provider='openai',
-    model_name='gpt-4',
-    llm_kwargs={'temperature': 0.7, 'max_tokens': 1000}
-)
-```
-
-### Using Different Providers via API
+### Using the API Endpoint
 
 ```bash
+# Basic query
+curl -X POST http://localhost:8000/api/rag/chat/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What types of bread do you have?"
+  }'
+
+# With provider and model
 curl -X POST http://localhost:8000/api/rag/chat/ \
   -H "Content-Type: application/json" \
   -d '{
@@ -324,7 +506,77 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
     "model": "gpt-4",
     "llm_kwargs": {"temperature": 0.7}
   }'
+
+# With metadata filter
+curl -X POST http://localhost:8000/api/rag/chat/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "Tell me about multigrain bread",
+    "filter": {"model": "BreadPage"}
+  }'
 ```
+
+## How It Works
+
+1. **Indexing**: The `build_rag_index` command:
+   - Discovers all Wagtail Page models dynamically
+   - Extracts text from pages (title, body, StreamField, RichTextField, etc.)
+   - Chunks the text using RecursiveCharacterTextSplitter
+   - Generates embeddings using the configured embedding provider
+   - Stores chunks in ChromaDB with deterministic IDs
+
+2. **Querying**: The chatbot:
+   - Uses MultiQueryRetriever to generate query variations
+   - Searches ChromaDB for similar chunks
+   - Optionally searches Wagtail's full-text index (hybrid search)
+   - Combines and deduplicates results
+   - Boosts documents with matching titles (handles typos)
+   - Passes context to LLM for answer generation
+
+## Architecture
+
+- **Vector Store**: ChromaDB for storing embeddings
+- **Embeddings**: Multiple providers supported (HuggingFace, OpenAI, Cohere, Google, Sentence Transformers, Custom)
+- **LLM**: Multiple providers supported (Ollama, OpenAI, Anthropic, HuggingFace, Google, Cohere, Custom)
+- **Framework**: LangChain for orchestration
+- **Search**: Hybrid search (ChromaDB + Wagtail full-text)
+
+## Troubleshooting
+
+### "Collection expecting embedding with dimension of X, got Y"
+
+This error occurs when you change embedding providers/models without resetting the index. Different embedding models produce vectors of different dimensions.
+
+**Solution:**
+```bash
+python manage.py build_rag_index --reset
+```
+
+### "The model 'X' does not exist or you do not have access to it"
+
+This error occurs when you specify a model name that doesn't match the provider (e.g., using an Ollama model name with OpenAI provider).
+
+**Solution**: The system will automatically detect this and use the provider's default model. Make sure your settings match:
+```python
+WAGTAIL_RAG_LLM_PROVIDER = 'openai'
+WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
+```
+
+### "No pages found to index"
+
+- Make sure you have published pages in Wagtail admin
+- Check pages are live (not draft)
+- Verify your `WAGTAIL_RAG_MODELS` setting includes the correct model names
+
+### "Connection refused" (Ollama)
+
+- Make sure `ollama serve` is running
+- Test with: `ollama list`
+
+### "Could not import LangChain"
+
+- Install required packages: `pip install langchain langchain-community langchain-text-splitters`
+- Install provider-specific packages based on your configuration
 
 ## Requirements
 
@@ -333,7 +585,6 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
 - Wagtail 4.0+
 - ChromaDB
 - LangChain
-- HuggingFace embeddings
 
 **LLM Provider Requirements** (install based on your choice):
 - **Ollama**: `pip install langchain-community ollama` (for local LLM)
@@ -343,6 +594,54 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
 - **HuggingFace**: `pip install langchain-huggingface transformers`
 - **Cohere**: `pip install langchain-community cohere`
 
+**Embedding Provider Requirements** (install based on your choice):
+- **HuggingFace**: `pip install langchain-huggingface sentence-transformers`
+- **OpenAI**: `pip install langchain-openai`
+- **Cohere**: `pip install langchain-community cohere`
+- **Google**: `pip install langchain-google-genai`
+- **Sentence Transformers**: `pip install sentence-transformers`
+
+## Cost Considerations
+
+| Provider | Cost per 1M tokens (input) | Notes |
+|----------|----------------------------|-------|
+| **Ollama** | Free | Local only, requires hardware |
+| **OpenAI GPT-4** | ~$30 | Most capable |
+| **OpenAI GPT-3.5** | ~$0.50 | Fast, cost-effective |
+| **Anthropic Claude** | ~$15 | Excellent quality |
+| **Google Gemini** | ~$0.50 | Competitive pricing |
+| **Cohere** | ~$15 | Fast responses |
+| **HuggingFace** | Varies | Free for public models |
+
+**Embedding Costs:**
+- **HuggingFace**: Free (local)
+- **OpenAI**: ~$0.0001 per 1K tokens
+- **Cohere**: ~$0.0001 per 1K tokens
+- **Google**: Varies
+
+*Prices are approximate and subject to change. Check provider websites for current pricing.*
+
+## Recommendations
+
+### Development/Testing
+- **LLM**: Use Ollama (free, local)
+- **Embeddings**: Use HuggingFace (free, local)
+
+### Production (Budget)
+- **LLM**: Use OpenAI GPT-3.5 or Google Gemini
+- **Embeddings**: Use HuggingFace or OpenAI `text-embedding-3-small`
+
+### Production (Quality)
+- **LLM**: Use OpenAI GPT-4 or Anthropic Claude
+- **Embeddings**: Use OpenAI `text-embedding-ada-002` or `text-embedding-3-large`
+
+### Privacy-Sensitive
+- **LLM**: Use Ollama or self-hosted HuggingFace models
+- **Embeddings**: Use HuggingFace (local)
+
+### Multilingual
+- **Embeddings**: Use Cohere `embed-multilingual-v3.0`
+
 ## License
 
 MIT License
@@ -350,4 +649,3 @@ MIT License
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
