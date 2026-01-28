@@ -648,6 +648,37 @@ class Command(BaseCommand):
         model_names = options['models'] or getattr(settings, 'WAGTAIL_RAG_MODELS', None)
         exclude_models = options['exclude_models'] or []
         model_fields_arg = options['model_fields'] or []
+        explicit_model_fields_provided = bool(options['model_fields'])
+
+        # Support convenience syntax "app.Model:*" in WAGTAIL_RAG_MODELS / --models
+        #
+        # Example:
+        #   WAGTAIL_RAG_MODELS = [
+        #       "breads.BreadPage",
+        #       "locations.LocationPage:*",
+        #   ]
+        #
+        # becomes:
+        #   model_names      = ["breads.BreadPage", "locations.LocationPage"]
+        #   model_fields_arg = ["locations.LocationPage:*"]  (if no explicit model_fields provided)
+        auto_model_fields = []
+        if model_names:
+            cleaned_model_names = []
+            for name in model_names:
+                if isinstance(name, str) and name.endswith(":*"):
+                    base = name.split(":", 1)[0]
+                    cleaned_model_names.append(base)
+                    auto_model_fields.append(f"{base}:*")
+                else:
+                    cleaned_model_names.append(name)
+            model_names = cleaned_model_names
+
+            # Only apply auto-generated model fields if the user did NOT explicitly
+            # pass --model-fields or WAGTAIL_RAG_MODEL_FIELDS and if we don't already
+            # have model_fields_arg from CLI.
+            if not explicit_model_fields_provided and not model_fields_arg and auto_model_fields:
+                model_fields_arg = auto_model_fields
+
         chunk_size = options['chunk_size'] or getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 1000)
         chunk_overlap = options['chunk_overlap'] or getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 200)
         collection_name = options['collection_name']

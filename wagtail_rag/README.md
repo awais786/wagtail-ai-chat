@@ -168,30 +168,34 @@ WAGTAIL_RAG_USE_HYBRID_SEARCH = True
 ### Model Indexing Configuration
 
 ```python
-# Models to index (None = index all Page models)
+# Models to index (None = index all Page models).
+# You can use the shorthand "app.Model:*" here to say:
+#   "index this model and treat all its content fields as important".
 WAGTAIL_RAG_MODELS = [
-    'blog.BlogPage',
-    'breads.BreadPage',
-    'products.ProductPage',
+    "blog.BlogPage",
+    "breads.BreadPage:*",       # index BreadPage, all fields
+    "products.ProductPage",     # index ProductPage, standard field extraction
 ]
 
-# Models to exclude from indexing
+# Models to exclude from indexing (always excluded, even if in WAGTAIL_RAG_MODELS)
 WAGTAIL_RAG_EXCLUDE_MODELS = [
-    'wagtailcore.Page',
-    'wagtailcore.Site',
-    'wagtailcore.Redirect',
+    "wagtailcore.Page",
+    "wagtailcore.Site",
+    "wagtailcore.Redirect",
 ]
 
-# Model-specific important fields
+# Optional: model-specific important fields (for fine‑grained control).
+# Use this when you do NOT want to rely on the ":*" shorthand in WAGTAIL_RAG_MODELS,
+# or when you want to specify exactly which fields matter.
 WAGTAIL_RAG_MODEL_FIELDS = [
-    'breads.BreadPage:bread_type,origin',
-    'blog.BlogPage:author,date_published',
-    'products.ProductPage:price,sku',
+    "breads.BreadPage:bread_type,origin",
+    "blog.BlogPage:author,date_published",
+    "products.ProductPage:price,sku",
 ]
 
-# You can also use '*' to include all model fields for a given model:
+# You can also use "*" here to include all *content* fields for a given model:
 # WAGTAIL_RAG_MODEL_FIELDS = [
-#     'breads.BreadPage:*',
+#     "breads.BreadPage:*",
 # ]
 
 # Text chunking configuration
