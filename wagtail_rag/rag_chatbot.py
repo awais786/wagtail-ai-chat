@@ -80,137 +80,100 @@ class RAGChatBot:
         
         Args:
             collection_name: Name of the ChromaDB collection (default: from settings)
-            model_name: Name of the LLM model (default: from settings or 'mistral')
+            model_name: Name of the LLM model (default: from settings)
             persist_directory: Path to ChromaDB persistence directory (default: from settings)
-            metadata_filter: Dict to filter by metadata (e.g., {'model': 'BreadPage'}) (default: None)
-            llm_provider: LLM provider type ('ollama', 'openai', 'anthropic', etc.) (default: from settings or 'ollama')
-            llm_kwargs: Additional kwargs to pass to LLM initialization (default: None)
+            metadata_filter: Dict to filter by metadata (e.g., {'model': 'BreadPage'})
+            llm_provider: LLM provider type ('ollama', 'openai', 'anthropic', etc.)
+            llm_kwargs: Additional kwargs to pass to LLM initialization
         """
-        # Get collection name from settings or use default
-        if collection_name is None:
-            collection_name = getattr(
-                settings,
-                'WAGTAIL_RAG_COLLECTION_NAME',
-                'wagtail_rag'
-            )
-        
-        # Get persist directory from settings or use default
-        if persist_directory is None:
-            persist_directory = getattr(
-                settings,
-                'WAGTAIL_RAG_CHROMA_PATH',
-                os.path.join(settings.BASE_DIR, 'chroma_db')
-            )
-        
-        # Get LLM provider from settings if not provided (needed to determine model default)
-        if llm_provider is None:
-            llm_provider = getattr(settings, 'WAGTAIL_RAG_LLM_PROVIDER', 'ollama')
-        
-        # Get model name from settings or use provider-specific default
-        # Don't set a default here - let get_llm() handle provider-specific defaults
-        if model_name is None:
-            model_name = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None)
-            # If still None, get_llm() will use provider-specific defaults
-        
-        self.collection_name = collection_name
-        self.persist_directory = persist_directory
-        self.model_name = model_name  # May be None, get_llm() will set appropriate default
-        self.metadata_filter = metadata_filter or {}
-        
-        # Get embedding provider from settings if not provided
-        embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
-        embedding_model = getattr(
+        # Initialize configuration
+        self.collection_name = collection_name or getattr(settings, 'WAGTAIL_RAG_COLLECTION_NAME', 'wagtail_rag')
+        self.persist_directory = persist_directory or getattr(
             settings,
-            'WAGTAIL_RAG_EMBEDDING_MODEL',
-            None  # Will use provider default
+            'WAGTAIL_RAG_CHROMA_PATH',
+            os.path.join(settings.BASE_DIR, 'chroma_db')
         )
-        
-        # Log the configuration being used
+        self.llm_provider = llm_provider or getattr(settings, 'WAGTAIL_RAG_LLM_PROVIDER', 'ollama')
+        self.model_name = model_name or getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None)
+        self.metadata_filter = metadata_filter or {}
+        self.k_value = getattr(settings, 'WAGTAIL_RAG_RETRIEVE_K', 8)
+
+        # Get embedding configuration
+        embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
+        embedding_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None)
+
+        # Log configuration
+        self._log_configuration(embedding_provider, embedding_model)
+
+        # Initialize components
+        self.embeddings = get_embeddings(provider=embedding_provider, model_name=embedding_model)
+        self.vectorstore = self._create_vectorstore()
+        self.llm = self._create_llm(llm_kwargs or {})
+        self.retriever = self._create_retriever()
+
+        # Initialize searcher and generator
+        use_hybrid_search = getattr(settings, 'WAGTAIL_RAG_USE_HYBRID_SEARCH', True) and _is_wagtail_available()
+        self.embedding_searcher = EmbeddingSearcher(
+            vectorstore=self.vectorstore,
+            retriever=self.retriever,
+            k_value=self.k_value,
+            use_hybrid_search=use_hybrid_search
+        )
+        self.llm_generator = LLMGenerator(llm=self.llm, retriever=self.retriever)
+        self.qa_chain = self.llm_generator.qa_chain
+
+    def _log_configuration(self, embedding_provider, embedding_model):
+        """Log the chatbot configuration."""
         logger.info(f"RAGChatBot initialized with:")
-        logger.info(f"  - Collection: {collection_name}")
-        logger.info(f"  - LLM Provider: {llm_provider}")
-        logger.info(f"  - LLM Model: {self.model_name}")
+        logger.info(f"  - Collection: {self.collection_name}")
+        logger.info(f"  - LLM Provider: {self.llm_provider}")
+        logger.info(f"  - LLM Model: {self.model_name or 'default for provider'}")
         logger.info(f"  - Embedding Provider: {embedding_provider}")
         logger.info(f"  - Embedding Model: {embedding_model or 'default for provider'}")
-        
-        # Initialize embeddings using the factory function
-        self.embeddings = get_embeddings(
-            provider=embedding_provider,
-            model_name=embedding_model
-        )
-        
-        # Load vector store
-        self.vectorstore = Chroma(
-            persist_directory=persist_directory,
-            collection_name=collection_name,
+
+    def _create_vectorstore(self):
+        """Create and return the ChromaDB vectorstore."""
+        return Chroma(
+            persist_directory=self.persist_directory,
+            collection_name=self.collection_name,
             embedding_function=self.embeddings
         )
-        
-        # Initialize LLM using the factory function
-        # Pass model_name=None if not set, so get_llm() can use provider-specific defaults
-        llm_kwargs = llm_kwargs or {}
-        self.llm_provider = llm_provider  # Store for reference
-        self.llm = get_llm(
-            provider=llm_provider,
-            model_name=self.model_name,  # May be None, get_llm() will use provider default
-            **llm_kwargs
-        )
-        # Get the actual model name that was used (in case get_llm() set a default)
-        # We can't easily get it back from the LLM object, so we'll log what we know
-        actual_model = self.model_name or f"default for {llm_provider}"
-        logger.info(f"LLM initialized successfully: {llm_provider} / {actual_model}")
-        # Update self.model_name for reference (though it may still be None)
-        # The actual model is determined by get_llm() internally
-        
-        # Create base retriever with configurable parameters
-        k_value = getattr(settings, 'WAGTAIL_RAG_RETRIEVE_K', 8)
-        
+
+    def _create_llm(self, llm_kwargs):
+        """Create and return the LLM instance."""
+        llm = get_llm(provider=self.llm_provider, model_name=self.model_name, **llm_kwargs)
+        logger.info(f"LLM initialized successfully: {self.llm_provider} / {self.model_name or 'default'}")
+        return llm
+
+    def _create_retriever(self):
+        """Create and return the retriever instance."""
         # Build search kwargs with optional metadata filtering
-        search_kwargs = {"k": k_value}
+        search_kwargs = {"k": self.k_value}
         if self.metadata_filter:
             search_kwargs["filter"] = self.metadata_filter
         
-        base_retriever = self.vectorstore.as_retriever(
-            search_kwargs=search_kwargs
-        )
-        
+        base_retriever = self.vectorstore.as_retriever(search_kwargs=search_kwargs)
+
         # Use MultiQueryRetriever if available and enabled
         use_multi_query = getattr(settings, 'WAGTAIL_RAG_USE_MULTI_QUERY', True) and MULTI_QUERY_AVAILABLE
         if use_multi_query:
             try:
-                self.retriever = MultiQueryRetriever.from_llm(
-                    retriever=base_retriever,
-                    llm=self.llm
-                )
+                return MultiQueryRetriever.from_llm(retriever=base_retriever, llm=self.llm)
             except Exception:
-                # Fallback to base retriever if MultiQuery fails
-                self.retriever = base_retriever
-        else:
-            self.retriever = base_retriever
-        
-        # Store k value for limiting results
-        self.k_value = k_value
-        
-        # Enable hybrid search (Wagtail + ChromaDB)
-        use_hybrid_search = getattr(settings, 'WAGTAIL_RAG_USE_HYBRID_SEARCH', True) and _is_wagtail_available()
-        
-        # Initialize embedding searcher
-        self.embedding_searcher = EmbeddingSearcher(
-            vectorstore=self.vectorstore,
-            retriever=self.retriever,
-            k_value=k_value,
-            use_hybrid_search=use_hybrid_search
-        )
-        
-        # Initialize LLM generator
-        self.llm_generator = LLMGenerator(
-            llm=self.llm,
-            retriever=self.retriever
-        )
-        
-        # Store qa_chain reference for backward compatibility
-        self.qa_chain = self.llm_generator.qa_chain
-    
+                pass
+
+        return base_retriever
+
+    def _format_sources(self, docs):
+        """Format document sources for the response."""
+        return [
+            {
+                'content': doc.page_content[:200] + '...',
+                'metadata': doc.metadata
+            }
+            for doc in docs
+        ]
+
     def query(self, question, boost_title_matches=True):
         """
         Query the RAG chatbot with a question.
@@ -220,20 +183,14 @@ class RAGChatBot:
         2. LLM generation: Generates an answer using the LLM with the retrieved context
         
         Args:
-            question: The user's natural‑language question.
+            question: The user's natural-language question
             boost_title_matches: If True, prioritize documents whose titles
-                look similar to the query (helps with short queries like bread names).
-            
+                look similar to the query (helps with short queries like bread names)
+
         Returns:
             A dict with:
-              - 'answer': string generated by the LLM (from LLM generation step)
-              - 'sources': list of { 'content', 'metadata' } for retrieved docs (from embedding search step)
-
-        Notes:
-            The LLM generation step:
-              * In the LCEL path: via `self.qa_chain.invoke(question)` which
-                executes the chain: retriever → prompt → self.llm → parser.
-              * In the fallback path: via a direct `self.llm(prompt_text)` call.
+              - 'answer': string generated by the LLM
+              - 'sources': list of { 'content', 'metadata' } for retrieved docs
         """
         # Step 1: Retrieve documents using embedding search
         docs = self.embedding_searcher.retrieve_with_embeddings(question, boost_title_matches=boost_title_matches)
@@ -242,45 +199,20 @@ class RAGChatBot:
         if self.qa_chain is None:
             # Simple fallback implementation
             answer = self.llm_generator.generate_answer_with_llm(question, docs)
-            return {
-                'answer': answer,
-                'sources': [
-                    {
-                        'content': doc.page_content[:200] + '...',
-                        'metadata': doc.metadata
-                    }
-                    for doc in docs
-                ]
-            }
-        
+            return {'answer': answer, 'sources': self._format_sources(docs)}
+
         if USE_LCEL:
             # LCEL pattern - chain handles retrieval + LLM generation internally
-            # But we use our custom retrieved docs (with hybrid search, title boosting) for sources
             answer = self.qa_chain.invoke(question)
-            return {
-                'answer': answer,
-                'sources': [
-                    {
-                        'content': doc.page_content[:200] + '...',
-                        'metadata': doc.metadata
-                    }
-                    for doc in docs
-                ]
-            }
-        else:
-            # Old RetrievalQA pattern - chain handles both embedding search and LLM generation
-            result = self.qa_chain({"query": question})
-            return {
-                'answer': result['result'],
-                'sources': [
-                    {
-                        'content': doc.page_content[:200] + '...',
-                        'metadata': doc.metadata
-                    }
-                    for doc in result['source_documents']
-                ]
-            }
-    
+            return {'answer': answer, 'sources': self._format_sources(docs)}
+
+        # Legacy RetrievalQA pattern
+        result = self.qa_chain({"query": question})
+        return {
+            'answer': result['result'],
+            'sources': self._format_sources(result['source_documents'])
+        }
+
     def update_filter(self, metadata_filter):
         """
         Update the metadata filter for the retriever.
@@ -289,8 +221,7 @@ class RAGChatBot:
             metadata_filter: Dict to filter by metadata (e.g., {'model': 'BreadPage'})
         """
         self.metadata_filter = metadata_filter or {}
-        k_value = getattr(settings, 'WAGTAIL_RAG_RETRIEVE_K', 8)
-        search_kwargs = {"k": k_value}
+        search_kwargs = {"k": self.k_value}
         if self.metadata_filter:
             search_kwargs["filter"] = self.metadata_filter
         self.retriever = self.vectorstore.as_retriever(search_kwargs=search_kwargs)
@@ -303,32 +234,25 @@ class RAGChatBot:
         but does NOT call the LLM to generate an answer.
         
         Args:
-            query: Search query string.
-            k: Number of results to return (default: from settings or 10).
+            query: Search query string
+            k: Number of results to return (default: from settings or 10)
             metadata_filter: Optional filter dict (e.g., {'model': 'BreadPage'})
             
         Returns:
             List[dict] where each item is:
               {
-                  "content": plain‑text snippet (HTML stripped),
+                  "content": plain-text snippet (HTML stripped),
                   "metadata": original metadata dict stored with the chunk,
                   "score": similarity score from Chroma
               }
-
-        Notes:
-            This method does NOT call the LLM. It only:
-              1. Uses the embeddings + Chroma to find similar chunks (embedding search).
-              2. Deduplicates results so each page (URL/ID) appears at most once.
-              3. Strips HTML from the stored chunk text for cleaner display.
         """
         return self.embedding_searcher.search_with_embeddings(query, k=k, metadata_filter=metadata_filter)
     
-    # Backward compatibility alias
     def search_similar(self, query, k=None, metadata_filter=None):
         """
         Deprecated: Use search_with_embeddings() instead.
         
-        This method is kept for backward compatibility and will be removed in a future version.
+        This method is kept for backward compatibility.
         """
         return self.search_with_embeddings(query, k=k, metadata_filter=metadata_filter)
 

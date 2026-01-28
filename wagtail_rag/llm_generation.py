@@ -51,12 +51,12 @@ class LLMGenerator:
         """
         self.llm = llm
         self.retriever = retriever
-        
-        # Create prompt template
-        # NOTE: Default prompt is intentionally simple and avoids meta-comments like
-        # "the context provided does not contain...". It asks the LLM to answer
-        # directly from context, and if some detail is missing, simply not to mention it.
-        prompt_template_str = getattr(
+        self.prompt_template_str = self._get_prompt_template()
+        self.qa_chain = self._create_qa_chain()
+
+    def _get_prompt_template(self):
+        """Get the prompt template from settings or use default."""
+        return getattr(
             settings,
             'WAGTAIL_RAG_PROMPT_TEMPLATE',
             """You are a helpful assistant for a bakery website.
@@ -72,49 +72,55 @@ Question:
 
 Answer:"""
         )
-        
-        # Create QA chain based on available LangChain version
-        self.qa_chain = None
+
+    def _create_qa_chain(self):
+        """Create QA chain based on available LangChain version."""
+        if not self.retriever:
+            return None
+
         if USE_LCEL:
-            # Use LCEL pattern (LangChain 0.1+)
-            prompt = ChatPromptTemplate.from_template(prompt_template_str)
-            
-            def format_docs(docs):
-                return "\n\n".join(doc.page_content for doc in docs)
-            
-            if retriever:
-                self.qa_chain = (
-                    {
-                        "context": retriever | format_docs,
-                        "question": RunnablePassthrough()
-                    }
-                    | prompt
-                    | llm
-                    | StrOutputParser()
-                )
-            else:
-                self.qa_chain = None
+            return self._create_lcel_chain()
         elif USE_LCEL is False:
-            # Use old RetrievalQA pattern
-            prompt = PromptTemplate(
-                template=prompt_template_str,
-                input_variables=["context", "question"]
-            )
-            if retriever:
-                self.qa_chain = RetrievalQA.from_chain_type(
-                    llm=llm,
-                    chain_type="stuff",
-                    retriever=retriever,
-                    return_source_documents=True,
-                    chain_type_kwargs={"prompt": prompt}
-                )
-            else:
-                self.qa_chain = None
-        else:
-            # Simple fallback - just use LLM directly
-            self.qa_chain = None
-            self.prompt_template_str = prompt_template_str
-    
+            return self._create_legacy_chain()
+
+        return None
+
+    def _create_lcel_chain(self):
+        """Create LCEL-based chain (LangChain 0.1+)."""
+        prompt = ChatPromptTemplate.from_template(self.prompt_template_str)
+
+        def format_docs(docs):
+            return "\n\n".join(doc.page_content for doc in docs)
+
+        return (
+            {
+                "context": self.retriever | format_docs,
+                "question": RunnablePassthrough()
+            }
+            | prompt
+            | self.llm
+            | StrOutputParser()
+        )
+
+    def _create_legacy_chain(self):
+        """Create legacy RetrievalQA chain."""
+        prompt = PromptTemplate(
+            template=self.prompt_template_str,
+            input_variables=["context", "question"]
+        )
+        return RetrievalQA.from_chain_type(
+            llm=self.llm,
+            chain_type="stuff",
+            retriever=self.retriever,
+            return_source_documents=True,
+            chain_type_kwargs={"prompt": prompt}
+        )
+
+    def _format_simple_prompt(self, question, docs):
+        """Format a simple prompt when no chain is available."""
+        context = "\n\n".join(doc.page_content for doc in docs)
+        return self.prompt_template_str.format(context=context, question=question)
+
     def generate_answer_with_llm(self, question, docs):
         """
         Generate an answer using the LLM with the retrieved context documents.
@@ -127,27 +133,18 @@ Answer:"""
             str: The LLM-generated answer
         """
         if self.qa_chain is None:
-            # Simple fallback implementation - use retrieved docs directly
-            context = "\n\n".join([doc.page_content for doc in docs])
-            prompt_text = f"""Use the following context to answer the question.
-If you don't know the answer, just say that you don't know.
-
-Context: {context}
-
-Question: {question}
-
-Answer: """
+            # Simple fallback - use LLM directly with formatted prompt
+            prompt_text = self._format_simple_prompt(question, docs)
             return self.llm(prompt_text)
         
         if USE_LCEL:
-            # LCEL pattern - chain handles retrieval internally, but we pass docs for consistency
-            # Note: The chain will retrieve again, but we use our retrieved docs for sources
+            # LCEL chain handles retrieval internally
             return self.qa_chain.invoke(question)
-        else:
-            # Old RetrievalQA pattern
-            result = self.qa_chain({"query": question})
-            return result['result']
-    
+
+        # Legacy RetrievalQA pattern
+        result = self.qa_chain({"query": question})
+        return result['result']
+
     def generate_answer(self, question, docs=None):
         """
         Generate an answer using the LLM.
@@ -157,25 +154,27 @@ Answer: """
         
         Args:
             question: The user's question
-            docs: Optional list of Document objects (for fallback mode)
-            
+            docs: Optional list of Document objects (required for fallback mode)
+
         Returns:
             str: The LLM-generated answer
         """
         if self.qa_chain is None:
-            # Fallback mode - need docs
             if docs is None:
                 raise ValueError("docs required when qa_chain is None")
             return self.generate_answer_with_llm(question, docs)
-        
+
+        # If docs provided, use them directly
+        if docs:
+            return self.generate_answer_with_llm(question, docs)
+
+        # Use chain
         if USE_LCEL:
-            # LCEL pattern - chain handles retrieval internally
             return self.qa_chain.invoke(question)
-        else:
-            # Old RetrievalQA pattern
-            result = self.qa_chain({"query": question})
-            return result['result']
-    
+
+        result = self.qa_chain({"query": question})
+        return result['result']
+
     def get_source_documents_from_chain(self, question):
         """
         Get source documents from the QA chain (for legacy RetrievalQA).
