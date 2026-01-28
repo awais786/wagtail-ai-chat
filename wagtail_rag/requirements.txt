@@ -1,11 +1,46 @@
-# Core dependencies for Wagtail RAG
+# Core dependencies for Wagtail RAG (required)
 langchain>=0.1.0
 langchain-community>=0.0.20
 langchain-text-splitters>=0.0.1
-langchain-huggingface>=0.0.1
-sentence-transformers>=2.2.0
 chromadb>=0.4.0
 beautifulsoup4>=4.12.0
+tiktoken>=0.5.0
 
-# Optional: For local LLM (Ollama)
-# ollama>=0.1.0  # Install separately: pip install ollama
+# ============================================================================
+# Optional: Embedding Providers (install only what you need)
+# ============================================================================
+
+# HuggingFace embeddings (local, free)
+# Install with: pip install wagtail-rag[huggingface]
+# Or manually: pip install langchain-huggingface sentence-transformers
+langchain-huggingface>=0.0.1
+sentence-transformers>=2.2.0
+
+# OpenAI embeddings (hosted, requires API key)
+# Install with: pip install wagtail-rag[openai]
+# Or manually: pip install langchain-openai
+# langchain-openai>=0.0.1
+
+# Cohere embeddings (hosted, requires API key)
+# Install with: pip install wagtail-rag[cohere]
+# Or manually: pip install cohere
+# cohere>=4.0.0
+
+# Google embeddings (hosted, requires API key)
+# Install with: pip install wagtail-rag[google]
+# Or manually: pip install langchain-google-genai
+# langchain-google-genai>=0.0.1
+
+# ============================================================================
+# Optional: LLM Providers (install only what you need)
+# ============================================================================
+
+# Ollama (local LLM)
+# Install with: pip install wagtail-rag[ollama]
+# Or manually: pip install ollama
+# ollama>=0.1.0
+
+# Anthropic Claude (hosted, requires API key)
+# Install with: pip install wagtail-rag[anthropic]
+# Or manually: pip install langchain-anthropic
+# langchain-anthropic>=0.0.1

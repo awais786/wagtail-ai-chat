@@ -38,13 +38,43 @@ setup(
         "langchain>=0.1.0",
         "langchain-community>=0.0.20",
         "langchain-text-splitters>=0.0.1",
-        "langchain-huggingface>=0.0.1",
-        "sentence-transformers>=2.2.0",
         "chromadb>=0.4.0",
         "beautifulsoup4>=4.12.0",
         "tiktoken>=0.5.0",
     ],
     extras_require={
+        # Embedding providers (install only what you need)
+        "huggingface": [
+            "langchain-huggingface>=0.0.1",
+            "sentence-transformers>=2.2.0",
+        ],
+        "openai": [
+            "langchain-openai>=0.0.1",
+        ],
+        "cohere": [
+            "cohere>=4.0.0",
+        ],
+        "google": [
+            "langchain-google-genai>=0.0.1",
+        ],
+        # LLM providers (install only what you need)
+        "ollama": [
+            "ollama>=0.1.0",
+        ],
+        "anthropic": [
+            "langchain-anthropic>=0.0.1",
+        ],
+        # All providers (for convenience)
+        "all": [
+            "langchain-huggingface>=0.0.1",
+            "sentence-transformers>=2.2.0",
+            "langchain-openai>=0.0.1",
+            "cohere>=4.0.0",
+            "langchain-google-genai>=0.0.1",
+            "ollama>=0.1.0",
+            "langchain-anthropic>=0.0.1",
+        ],
+        # Development dependencies
         "dev": [
             "black",
             "flake8",
