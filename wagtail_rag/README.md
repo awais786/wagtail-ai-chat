@@ -92,18 +92,32 @@ To render the bundled chat/search widget on every page (floating in the bottom-r
 Add these settings to your Django `settings.py`:
 
 ```python
-# LLM Configuration
-WAGTAIL_RAG_LLM_PROVIDER = 'openai'  # or 'ollama'
-WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Provider-specific model name
-OPENAI_API_KEY = 'sk-...'  # Required for OpenAI (or set as environment variable)
+# Example 1: Local LLM (Ollama) + Local Embeddings (HuggingFace)
 
-# Embedding Configuration
-WAGTAIL_RAG_EMBEDDING_PROVIDER = 'openai'  # or 'huggingface', 'cohere', etc.
-WAGTAIL_RAG_EMBEDDING_MODEL = 'text-embedding-ada-002'  # Provider-specific model
+# Embedding model configuration
+WAGTAIL_RAG_EMBEDDING_PROVIDER = "huggingface"   # or "hf"
+WAGTAIL_RAG_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-# ChromaDB Configuration
-WAGTAIL_RAG_COLLECTION_NAME = 'wagtail_rag'
-WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'chroma_db')
+# LLM configuration
+WAGTAIL_RAG_LLM_PROVIDER = "ollama"
+WAGTAIL_RAG_MODEL_NAME = "mistral"
+
+
+# Example 2: Hosted OpenAI for both LLM and embeddings
+
+# Embedding configuration
+WAGTAIL_RAG_EMBEDDING_PROVIDER = "openai"
+WAGTAIL_RAG_EMBEDDING_MODEL = "text-embedding-ada-002"
+
+# LLM configuration
+WAGTAIL_RAG_LLM_PROVIDER = "openai"
+WAGTAIL_RAG_MODEL_NAME = "gpt-4"
+OPENAI_API_KEY = "sk-..."  # or configure via environment variable
+
+
+# ChromaDB configuration (common to all setups)
+WAGTAIL_RAG_COLLECTION_NAME = "wagtail_rag"
+WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, "chroma_db")
 ```
 
 ### 2. Build the Index
