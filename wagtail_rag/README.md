@@ -184,19 +184,6 @@ WAGTAIL_RAG_EXCLUDE_MODELS = [
     "wagtailcore.Redirect",
 ]
 
-# Optional: model-specific important fields (for fine‑grained control).
-# Use this when you do NOT want to rely on the ":*" shorthand in WAGTAIL_RAG_MODELS,
-# or when you want to specify exactly which fields matter.
-WAGTAIL_RAG_MODEL_FIELDS = [
-    "breads.BreadPage:bread_type,origin",
-    "blog.BlogPage:author,date_published",
-    "products.ProductPage:price,sku",
-]
-
-# You can also use "*" here to include all *content* fields for a given model:
-# WAGTAIL_RAG_MODEL_FIELDS = [
-#     "breads.BreadPage:*",
-# ]
 
 # Text chunking configuration
 WAGTAIL_RAG_CHUNK_SIZE = 1000  # Size of each text chunk
@@ -243,9 +230,6 @@ python manage.py build_rag_index --models blog.BlogPage breads.BreadPage
 # Exclude specific models
 python manage.py build_rag_index --exclude-models blog.DraftPage
 
-# Add or override per-model important fields (CLI format)
-python manage.py build_rag_index \
-  --model-fields breads.BreadPage:bread_type,origin blog.BlogPage:author,date_published
 ```
 
 ### Using the Chatbot in Python

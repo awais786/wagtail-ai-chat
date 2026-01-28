@@ -16,6 +16,9 @@ setup(
     url="https://github.com/awais786/wagtail-ai-chat",
     packages=find_packages(exclude=['tests', 'tests.*']),
     include_package_data=True,
+    package_data={
+        'wagtail_rag': ['templates/**/*.html'],
+    },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
@@ -32,8 +35,6 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "Django>=3.2",
-        "wagtail>=4.0",
         "langchain>=0.1.0",
         "langchain-community>=0.0.20",
         "langchain-text-splitters>=0.0.1",

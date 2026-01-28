@@ -445,7 +445,7 @@ class Command(BaseCommand):
         """
         Return a filtered list of "content" field names for a model.
 
-        Used when WAGTAIL_RAG_MODEL_FIELDS contains a wildcard '*' for a model.
+        Used when model fields contain a wildcard '*' for a model.
         Excludes reverse relations and obvious admin/internal fields so that
         the indexed text focuses on meaningful content, not Wagtail internals.
         """
@@ -674,8 +674,7 @@ class Command(BaseCommand):
             model_names = cleaned_model_names
 
             # Only apply auto-generated model fields if the user did NOT explicitly
-            # pass --model-fields or WAGTAIL_RAG_MODEL_FIELDS and if we don't already
-            # have model_fields_arg from CLI.
+            # pass --model-fields and if we don't already have model_fields_arg from CLI.
             if not explicit_model_fields_provided and not model_fields_arg and auto_model_fields:
                 model_fields_arg = auto_model_fields
 
@@ -693,10 +692,6 @@ class Command(BaseCommand):
             ['wagtailcore.Page', 'wagtailcore.Site']
         )
         exclude_models = list(set(exclude_models + default_excludes))
-        
-        # Get default model-specific fields from settings if not provided via CLI
-        if not model_fields_arg:
-            model_fields_arg = getattr(settings, 'WAGTAIL_RAG_MODEL_FIELDS', [])
         
         # Parse model-specific fields
         model_fields_map = self._parse_model_fields(model_fields_arg)
