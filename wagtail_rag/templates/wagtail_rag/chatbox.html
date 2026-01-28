@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Chatbox</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .chatbox-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 600px;
+        }
+
+        .chatbox-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .chatbox-header h2 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 12px 20px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #6c757d;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .tab:hover {
+            background: #e9ecef;
+        }
+
+        .tab.active {
+            color: #667eea;
+            background: white;
+        }
+
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #667eea;
+        }
+
+        .chatbox-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: white;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            text-align: right;
+        }
+
+        .message.bot {
+            text-align: left;
+        }
+
+        .message-content {
+            display: inline-block;
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-content {
+            background: #667eea;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.bot .message-content {
+            background: #f1f3f5;
+            color: #212529;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.bot .message-content.error {
+            background: #fee;
+            color: #c33;
+            border: 1px solid #fcc;
+        }
+
+        .sources {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #6c757d;
+        }
+
+        .sources a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .sources a:hover {
+            text-decoration: underline;
+        }
+
+        .search-result {
+            background: #f8f9fa;
+            border-left: 3px solid #667eea;
+            padding: 12px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+        }
+
+        .search-result-title {
+            font-weight: 600;
+            color: #212529;
+            margin-bottom: 4px;
+        }
+
+        .search-result-content {
+            color: #6c757d;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .search-result-score {
+            font-size: 12px;
+            color: #667eea;
+        }
+
+        .chatbox-input-container {
+            padding: 16px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 8px;
+        }
+
+        .chatbox-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e9ecef;
+            border-radius: 24px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .chatbox-input:focus {
+            border-color: #667eea;
+        }
+
+        .send-button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 24px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        .send-button:hover:not(:disabled) {
+            background: #5568d3;
+        }
+
+        .send-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #6c757d;
+            padding: 40px 20px;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="chatbox-container">
+        <div class="chatbox-header">
+            <h2>Ask Me Anything</h2>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab active" data-mode="chat">💬 Chat</button>
+            <button class="tab" data-mode="search">🔍 Search</button>
+        </div>
+
+        <div class="chatbox-messages" id="messages">
+            <div class="empty-state">
+                <div class="empty-state-icon">💭</div>
+                <p>Start a conversation or search for content!</p>
+            </div>
+        </div>
+
+        <div class="chatbox-input-container">
+            <div class="input-wrapper">
+                <input 
+                    type="text" 
+                    class="chatbox-input" 
+                    id="userInput" 
+                    placeholder="Type your question or search query..."
+                    autocomplete="off"
+                >
+                <button class="send-button" id="sendButton">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/rag';
+        const CHAT_API = `${API_BASE}/chat/`;
+        const SEARCH_API = `${API_BASE}/search/`;
+
+        let currentMode = 'chat';
+        const messagesContainer = document.getElementById('messages');
+        const userInput = document.getElementById('userInput');
+        const sendButton = document.getElementById('sendButton');
+        const tabs = document.querySelectorAll('.tab');
+
+        // Tab switching
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentMode = tab.dataset.mode;
+                userInput.placeholder = currentMode === 'chat' 
+                    ? 'Type your question...' 
+                    : 'Type your search query...';
+            });
+        });
+
+        // Send message
+        function sendMessage() {
+            const query = userInput.value.trim();
+            if (!query) return;
+
+            // Clear empty state
+            const emptyState = messagesContainer.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+
+            // Add user message
+            addMessage(query, 'user');
+
+            // Clear input and disable button
+            userInput.value = '';
+            sendButton.disabled = true;
+            sendButton.innerHTML = '<div class="loading"></div>';
+
+            // Call appropriate API
+            if (currentMode === 'chat') {
+                callChatAPI(query);
+            } else {
+                callSearchAPI(query);
+            }
+        }
+
+        // Add message to UI
+        function addMessage(content, type, metadata = null) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = content;
+            messageDiv.appendChild(contentDiv);
+
+            if (metadata && type === 'bot') {
+                if (metadata.sources && metadata.sources.length > 0) {
+                    const sourcesDiv = document.createElement('div');
+                    sourcesDiv.className = 'sources';
+                    sourcesDiv.innerHTML = `<strong>Sources:</strong> `;
+                    const sourceLinks = metadata.sources.map((source, idx) => {
+                        const url = source.metadata?.url || '#';
+                        const title = source.metadata?.title || `Source ${idx + 1}`;
+                        return `<a href="${url}" target="_blank">${title}</a>`;
+                    }).join(', ');
+                    sourcesDiv.innerHTML += sourceLinks;
+                    messageDiv.appendChild(sourcesDiv);
+                }
+            }
+
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Add search results to UI
+        function addSearchResults(query, results) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message bot';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.innerHTML = `<strong>Found ${results.length} results for "${query}":</strong>`;
+            messageDiv.appendChild(contentDiv);
+
+            results.forEach(result => {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'search-result';
+                
+                const title = result.metadata?.title || 'Untitled';
+                const url = result.metadata?.url || '#';
+                const content = result.content.substring(0, 200) + (result.content.length > 200 ? '...' : '');
+                const score = (result.score * 100).toFixed(1);
+
+                resultDiv.innerHTML = `
+                    <div class="search-result-title">
+                        <a href="${url}" target="_blank">${title}</a>
+                    </div>
+                    <div class="search-result-content">${content}</div>
+                    <div class="search-result-score">Relevance: ${score}%</div>
+                `;
+                messageDiv.appendChild(resultDiv);
+            });
+
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Call Chat API
+        async function callChatAPI(question) {
+            try {
+                const response = await fetch(CHAT_API, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ question })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to get response');
+                }
+
+                addMessage(data.answer, 'bot', { sources: data.sources });
+            } catch (error) {
+                addMessage(`Error: ${error.message}`, 'bot');
+                const errorDiv = messagesContainer.querySelector('.message.bot:last-child .message-content');
+                if (errorDiv) errorDiv.classList.add('error');
+            } finally {
+                sendButton.disabled = false;
+                sendButton.textContent = 'Send';
+                userInput.focus();
+            }
+        }
+
+        // Call Search API
+        async function callSearchAPI(query) {
+            try {
+                const response = await fetch(SEARCH_API, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query, k: 5 })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to search');
+                }
+
+                if (data.results && data.results.length > 0) {
+                    addSearchResults(query, data.results);
+                } else {
+                    addMessage('No results found.', 'bot');
+                }
+            } catch (error) {
+                addMessage(`Error: ${error.message}`, 'bot');
+                const errorDiv = messagesContainer.querySelector('.message.bot:last-child .message-content');
+                if (errorDiv) errorDiv.classList.add('error');
+            } finally {
+                sendButton.disabled = false;
+                sendButton.textContent = 'Send';
+                userInput.focus();
+            }
+        }
+
+        // Event listeners
+        sendButton.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !sendButton.disabled) {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
+

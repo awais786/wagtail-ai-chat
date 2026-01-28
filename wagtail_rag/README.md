@@ -189,6 +189,11 @@ WAGTAIL_RAG_MODEL_FIELDS = [
     'products.ProductPage:price,sku',
 ]
 
+# You can also use '*' to include all model fields for a given model:
+# WAGTAIL_RAG_MODEL_FIELDS = [
+#     'breads.BreadPage:*',
+# ]
+
 # Text chunking configuration
 WAGTAIL_RAG_CHUNK_SIZE = 1000  # Size of each text chunk
 WAGTAIL_RAG_CHUNK_OVERLAP = 200  # Overlap between chunks
@@ -214,6 +219,29 @@ Index your Wagtail pages (uses your Django settings):
 
 ```bash
 python manage.py build_rag_index
+```
+
+Common variations:
+
+```bash
+# Reset (clear) the existing Chroma collection, then rebuild the index
+python manage.py build_rag_index --reset
+
+# Only reset/clear the collection without indexing
+python manage.py build_rag_index --reset-only
+
+# Re-index a single page by ID (useful after editing one page)
+python manage.py build_rag_index --page-id 123
+
+# Limit to specific models
+python manage.py build_rag_index --models blog.BlogPage breads.BreadPage
+
+# Exclude specific models
+python manage.py build_rag_index --exclude-models blog.DraftPage
+
+# Add or override per-model important fields (CLI format)
+python manage.py build_rag_index \
+  --model-fields breads.BreadPage:bread_type,origin blog.BlogPage:author,date_published
 ```
 
 ### Using the Chatbot in Python
