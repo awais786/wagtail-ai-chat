@@ -59,14 +59,34 @@ pip install langchain langchain-community langchain-text-splitters chromadb beau
 - **Google**: `pip install langchain-google-genai`
 - **Sentence Transformers**: `pip install sentence-transformers`
 
-### 4. Add URL Configuration (Optional, for API endpoint)
+### 4. Add URL Configuration (Optional, for API endpoints)
 
-In your main `urls.py`:
+In your main `urls.py` (e.g., `bakerydemo/urls.py`):
 ```python
-urlpatterns = [
-    # ... other patterns
-    path('', include('wagtail_rag.urls')),
+# Import wagtail_rag URLs
+urlpatterns += [
+    path("", include("wagtail_rag.urls")),
 ]
+
+
+```
+
+**Important**: Place `wagtail_rag_urls` before `wagtail_urls` so API routes are matched first.
+
+After adding this, the API endpoints will be available at:
+- `http://localhost:8000/api/rag/chat/` - Chat endpoint (GET or POST)
+- `http://localhost:8000/api/rag/search/` - Search endpoint (GET or POST)
+
+### 5. Add the Global Floating Chatbox to Your Templates
+
+To render the bundled chat/search widget on every page (floating in the bottom-right corner), include this in a base template such as `base.html`:
+
+```django
+{# Global RAG chatbox (from wagtail_rag) shown on all pages, floating bottom-right #}
+<div id="rag-chatbox-wrapper"
+     style="position: fixed; bottom: 1rem; right: 1rem; z-index: 9999;">
+    {% include "wagtail_rag/chatbox.html" %}
+</div>
 ```
 
 ## Quick Start
@@ -98,21 +118,21 @@ python manage.py build_rag_index
 
 ### 3. Use the Chatbot
 
-**In Python:**
-```python
-from wagtail_rag.rag_chatbot import get_chatbot
 
-chatbot = get_chatbot()
-result = chatbot.query("What content is available on this site?")
-print(result['answer'])
+**Via API (GET - Browser-friendly):**
+```bash
+# Simple GET request (works in browser)
+curl "http://localhost:8000/api/rag/chat/?q=What content is available?"
 ```
 
-**Via API:**
+**Via API (POST - JSON):**
 ```bash
 curl -X POST http://localhost:8000/api/rag/chat/ \
   -H "Content-Type: application/json" \
   -d '{"question": "What content is available?"}'
 ```
+
+**Note**: LLM provider and model are automatically read from Django settings (`WAGTAIL_RAG_LLM_PROVIDER` and `WAGTAIL_RAG_MODEL_NAME`). You don't need to pass them in the request.
 
 ## Configuration
 
@@ -150,14 +170,6 @@ WAGTAIL_RAG_EXCLUDE_MODELS = [
     'wagtailcore.Page',
     'wagtailcore.Site',
     'wagtailcore.Redirect',
-]
-
-# Global important fields to emphasize in all models
-WAGTAIL_RAG_IMPORTANT_FIELDS = [
-    'bread_type',
-    'origin',
-    'category',
-    'tags',
 ]
 
 # Model-specific important fields
@@ -487,8 +499,23 @@ for result in results:
     print(f"Content: {result['content'][:200]}...")
 ```
 
-### Using the API Endpoint
+### Using the API Endpoints
 
+#### Chat API (`/api/rag/chat/`)
+
+The chat API supports both GET and POST methods. LLM provider and model are automatically read from Django settings.
+
+**GET Request (Browser-friendly):**
+```bash
+# Simple query
+curl "http://localhost:8000/api/rag/chat/?q=What types of bread do you have?"
+
+# With metadata filter (JSON string)
+curl "http://localhost:8000/api/rag/chat/?q=Tell me about multigrain bread&filter=%7B%22model%22%3A%22BreadPage%22%7D"
+# Or in browser: http://localhost:8000/api/rag/chat/?q=bread&filter={"model":"BreadPage"}
+```
+
+**POST Request (JSON):**
 ```bash
 # Basic query
 curl -X POST http://localhost:8000/api/rag/chat/ \
@@ -497,13 +524,11 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
     "question": "What types of bread do you have?"
   }'
 
-# With provider and model
+# With LLM parameters (temperature, etc.)
 curl -X POST http://localhost:8000/api/rag/chat/ \
   -H "Content-Type: application/json" \
   -d '{
     "question": "What types of bread do you have?",
-    "provider": "openai",
-    "model": "gpt-4",
     "llm_kwargs": {"temperature": 0.7}
   }'
 
@@ -514,6 +539,69 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
     "question": "Tell me about multigrain bread",
     "filter": {"model": "BreadPage"}
   }'
+```
+
+**Response:**
+```json
+{
+  "answer": "We have several types of bread including...",
+  "sources": [
+    {
+      "content": "...",
+      "metadata": {
+        "title": "Multigrain Bread",
+        "url": "/breads/multigrain/",
+        "model": "BreadPage"
+      }
+    }
+  ]
+}
+```
+
+#### Search API (`/api/rag/search/`)
+
+The search API performs semantic search without generating an AI response. Useful for finding relevant content.
+
+**GET Request:**
+```bash
+# Basic search
+curl "http://localhost:8000/api/rag/search/?q=sourdough bread"
+
+# With number of results
+curl "http://localhost:8000/api/rag/search/?q=sourdough bread&k=5"
+
+# With metadata filter
+curl "http://localhost:8000/api/rag/search/?q=bread&filter=%7B%22model%22%3A%22BreadPage%22%7D"
+```
+
+**POST Request:**
+```bash
+curl -X POST http://localhost:8000/api/rag/search/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "sourdough bread",
+    "k": 5,
+    "filter": {"model": "BreadPage"}
+  }'
+```
+
+**Response:**
+```json
+{
+  "query": "sourdough bread",
+  "results": [
+    {
+      "content": "...",
+      "metadata": {
+        "title": "Sourdough Bread Recipe",
+        "url": "/breads/sourdough/",
+        "model": "BreadPage"
+      },
+      "score": 0.8234
+    }
+  ],
+  "count": 5
+}
 ```
 
 ## How It Works

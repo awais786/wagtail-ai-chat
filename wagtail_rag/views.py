@@ -6,6 +6,7 @@ This module provides API endpoints for querying the RAG chatbot.
 import json
 
 from django.http import JsonResponse
+from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
@@ -149,3 +150,9 @@ def rag_search_api(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
+
+def rag_chatbox_widget(request):
+    """
+    Serve the RAG chatbox widget HTML page.
+    """
+    return render(request, 'wagtail_rag/chatbox.html')
