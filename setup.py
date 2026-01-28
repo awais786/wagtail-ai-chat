@@ -43,6 +43,12 @@ setup(
         "tiktoken>=0.5.0",
     ],
     extras_require={
+        # Common local setup (HuggingFace embeddings + Ollama LLM)
+        "local": [
+            "langchain-huggingface>=0.0.1",
+            "sentence-transformers>=2.2.0",
+            "ollama>=0.1.0",
+        ],
         # Embedding providers (install only what you need)
         "huggingface": [
             "langchain-huggingface>=0.0.1",

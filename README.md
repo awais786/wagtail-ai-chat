@@ -44,28 +44,23 @@ INSTALLED_APPS = [
 
 **Install only the providers you need:**
 
-**For HuggingFace embeddings (default, local, free):**
+**For local setup (HuggingFace embeddings + Ollama LLM):**
+```bash
+pip install wagtail-rag[local]
+# Or: pip install wagtail-rag[huggingface,ollama]
+# Or separately: pip install langchain-huggingface sentence-transformers ollama
+```
+
+**For HuggingFace embeddings only:**
 ```bash
 pip install wagtail-rag[huggingface]
 # Or: pip install langchain-huggingface sentence-transformers
 ```
 
-**For OpenAI embeddings:**
+**For OpenAI (embeddings and/or LLM):**
 ```bash
 pip install wagtail-rag[openai]
 # Or: pip install langchain-openai
-```
-
-**For OpenAI LLM:**
-```bash
-pip install wagtail-rag[openai]
-# Or: pip install langchain-openai
-```
-
-**For Ollama LLM (local):**
-```bash
-pip install wagtail-rag[ollama]
-# Or: pip install ollama
 ```
 
 **For Anthropic Claude LLM:**
@@ -78,6 +73,8 @@ pip install wagtail-rag[anthropic]
 ```bash
 pip install wagtail-rag[all]
 ```
+
+**Note:** You can combine multiple providers in one command, e.g., `pip install wagtail-rag[huggingface,openai]`
 
 **Note:** Core dependencies (langchain, chromadb, etc.) are automatically installed with the package. You only need to install provider-specific dependencies.
 
@@ -461,6 +458,7 @@ WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
 
 - Core dependencies are installed automatically with the package
 - Install provider-specific dependencies based on your configuration:
+  - **Local setup**: `pip install wagtail-rag[local]` (HuggingFace + Ollama)
   - **HuggingFace**: `pip install wagtail-rag[huggingface]`
   - **OpenAI**: `pip install wagtail-rag[openai]`
   - **Ollama**: `pip install wagtail-rag[ollama]`
@@ -487,6 +485,10 @@ WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
 - **Ollama** (local): `pip install wagtail-rag[ollama]` or `pip install ollama`
 - **OpenAI**: `pip install wagtail-rag[openai]` or `pip install langchain-openai`
 - **Anthropic**: `pip install wagtail-rag[anthropic]` or `pip install langchain-anthropic`
+
+**Common combinations:**
+- **Local setup**: `pip install wagtail-rag[local]` (HuggingFace embeddings + Ollama LLM)
+- **OpenAI setup**: `pip install wagtail-rag[openai]` (OpenAI embeddings + LLM)
 
 **Install all providers at once:**
 ```bash
