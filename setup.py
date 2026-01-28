@@ -39,6 +39,7 @@ setup(
         "langchain-community>=0.0.20",
         "langchain-text-splitters>=0.0.1",
         "langchain-huggingface>=0.0.1",
+        "sentence-transformers>=2.2.0",
         "chromadb>=0.4.0",
         "beautifulsoup4>=4.12.0",
         "tiktoken>=0.5.0",

@@ -66,7 +66,9 @@ def get_embeddings(provider=None, model_name=None, **kwargs):
                 except ImportError:
                     raise ImportError(
                         "HuggingFace embeddings not available. "
-                        "Install with: pip install langchain-huggingface or langchain-community"
+                        "Install with: pip install langchain-huggingface sentence-transformers\n"
+                        "Or alternatively: pip install langchain-community sentence-transformers\n"
+                        "Or install all requirements: pip install -r wagtail_rag/requirements.txt"
                     )
     
     # OpenAI
