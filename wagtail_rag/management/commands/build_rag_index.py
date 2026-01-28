@@ -78,12 +78,6 @@ class Command(BaseCommand):
             help='Important fields to emphasize per model. Format: model_name:field1,field2 (e.g., breads.BreadPage:bread_type,origin)'
         )
         parser.add_argument(
-            '--important-fields',
-            nargs='+',
-            default=None,
-            help='Global important fields to emphasize in all models (e.g., bread_type origin category)'
-        )
-        parser.add_argument(
             '--chunk-size',
             type=int,
             default=1000,
@@ -140,15 +134,29 @@ class Command(BaseCommand):
 
                 elif 'paragraph' in block_type or 'richtext' in block_type:
                     if hasattr(block_value, 'source'):
-                        text_parts.append(block_value.source)
+                        # Strip HTML from RichText source
+                        clean_text = self._extract_text_from_richtext(block_value.source)
+                        if clean_text:
+                            text_parts.append(clean_text)
                     else:
-                        text_parts.append(str(block_value))
+                        # Try to extract as string and strip HTML if it looks like HTML
+                        raw_text = str(block_value)
+                        if '<' in raw_text and '>' in raw_text:
+                            clean_text = self._extract_text_from_richtext(raw_text)
+                            if clean_text:
+                                text_parts.append(clean_text)
+                        else:
+                            text_parts.append(raw_text)
 
                 elif 'quote' in block_type:
                     quote_text = self._extract_text_from_value(block_value, ['text', 'quote'])
                     if quote_text:
-                        attribute = self._extract_text_from_value(block_value, ['attribute_name', 'attribute'])
-                        text_parts.append(f'"{quote_text}"' + (f' - {attribute}' if attribute else ''))
+                        # Strip HTML if present
+                        if '<' in quote_text and '>' in quote_text:
+                            quote_text = self._extract_text_from_richtext(quote_text)
+                        if quote_text:
+                            attribute = self._extract_text_from_value(block_value, ['attribute_name', 'attribute'])
+                            text_parts.append(f'"{quote_text}"' + (f' - {attribute}' if attribute else ''))
 
                 elif 'image' in block_type:
                     caption = self._extract_text_from_value(block_value, ['caption', 'alt'])
@@ -168,9 +176,22 @@ class Command(BaseCommand):
                     text = self._extract_text_from_value(block_value,
                                                          ['text', 'content', 'value', 'body', 'description'])
                     if text:
-                        text_parts.append(text)
+                        # Strip HTML if it looks like HTML
+                        if '<' in text and '>' in text:
+                            clean_text = self._extract_text_from_richtext(text)
+                            if clean_text:
+                                text_parts.append(clean_text)
+                        else:
+                            text_parts.append(text)
                     else:
-                        text_parts.append(str(block_value))
+                        raw_text = str(block_value)
+                        # Strip HTML if it looks like HTML
+                        if '<' in raw_text and '>' in raw_text:
+                            clean_text = self._extract_text_from_richtext(raw_text)
+                            if clean_text:
+                                text_parts.append(clean_text)
+                        else:
+                            text_parts.append(raw_text)
 
             except Exception:
                 continue
@@ -260,17 +281,25 @@ class Command(BaseCommand):
         # Start with title
         text_parts = [f"Title: {page.title}"]
 
-        # If important fields are specified, extract and emphasize them first
+        # Track which fields we've already added to avoid duplication
+        added_fields = set(['title'])
+
+        # If important fields are specified, extract and add them first
         if important_fields:
             for field_name in important_fields:
+                if field_name in added_fields:
+                    continue  # Skip if already added
                 if hasattr(page, field_name):
                     value = getattr(page, field_name, None)
                     if value:
-                        # Handle ForeignKey relationships
-                        if hasattr(value, 'title'):
-                            field_value = value.title
+                        # Handle ForeignKey relationships and strings safely
+                        if hasattr(value, 'title') and not isinstance(value, str):
+                            # e.g. related objects with a 'title' field
+                            attr = getattr(value, 'title')
+                            field_value = attr() if callable(attr) else attr
                         elif hasattr(value, 'name'):
-                            field_value = value.name
+                            attr = getattr(value, 'name')
+                            field_value = attr() if callable(attr) else attr
                         elif hasattr(value, 'all'):  # ManyToMany
                             items = value.all()
                             if items:
@@ -281,20 +310,23 @@ class Command(BaseCommand):
                             else:
                                 continue
                         else:
+                            # Fallback: just cast to string
                             field_value = str(value)
 
-                        # Emphasize important fields by adding them multiple times
+                        # Add important fields once (avoid noisy duplication)
                         label = field_name.replace('_', ' ').title()
-                        text_parts.insert(0, f"{label}: {field_value}")  # Put at top
-                        text_parts.append(f"{label}: {field_value}")  # Also at end
+                        text_parts.append(f"{label}: {field_value}")
+                        added_fields.add(field_name)
 
-        # Common Wagtail fields
+        # Common Wagtail fields (only if not already in important_fields)
         common_fields = [
             'subtitle', 'introduction', 'description', 'summary',
             'date_published', 'first_published_at'
         ]
 
         for field_name in common_fields:
+            if field_name in added_fields:
+                continue  # Skip if already added via important_fields
             if hasattr(page, field_name):
                 value = getattr(page, field_name, None)
                 if value:
@@ -304,6 +336,7 @@ class Command(BaseCommand):
                         # Capitalize field name for display
                         label = field_name.replace('_', ' ').title()
                         text_parts.append(f"{label}: {value}")
+                    added_fields.add(field_name)
 
         # Extract StreamField content (common field name: 'body')
         streamfield_fields = ['body', 'content', 'backstory', 'instructions']
@@ -385,7 +418,9 @@ class Command(BaseCommand):
         """
         Parse --model-fields argument.
 
-        Format: model_name:field1,field2 model_name2:field3
+        Supports two formats:
+        1. List format: ['model_name:field1,field2', 'model_name2:field3']
+        2. Dictionary format: {'model_name': ['field1', 'field2'], 'model_name2': ['field3']}
 
         Returns:
             Dict mapping model names to list of important fields
@@ -393,6 +428,11 @@ class Command(BaseCommand):
         if not model_fields_arg:
             return {}
 
+        # If it's already a dictionary, return it as-is
+        if isinstance(model_fields_arg, dict):
+            return model_fields_arg
+
+        # Otherwise, parse as list format
         model_fields_map = {}
         for item in model_fields_arg:
             if ':' in item:
@@ -401,8 +441,73 @@ class Command(BaseCommand):
                 model_fields_map[model_name] = fields
         return model_fields_map
 
-    def _get_pages_to_index(self, model_names=None, exclude_models=None, model_fields_map=None, important_fields=None,
-                            page_id=None):
+    def _get_all_content_field_names(self, model):
+        """
+        Return a filtered list of "content" field names for a model.
+
+        Used when WAGTAIL_RAG_MODEL_FIELDS contains a wildcard '*' for a model.
+        Excludes reverse relations and obvious admin/internal fields so that
+        the indexed text focuses on meaningful content, not Wagtail internals.
+        """
+        from django.db.models import Field
+
+        exclude_names = {
+            # Reverse relations / admin metadata
+            'index_entries',
+            'specific_workflow_states',
+            'workflow_states',
+            'revisions',
+            'subscribers',
+            'wagtail_admin_comments',
+            'view_restrictions',
+            'group_permissions',
+            'aliases',
+            'sites_rooted_here',
+            # Low-level internals
+            'content_type',
+            'page_ptr',
+            # Wagtail Page base class internals
+            'path',
+            'depth',
+            'translation_key',
+            'locale',
+            'latest_revision',
+            'live',
+            'first_published_at',
+            'last_published_at',
+            'live_revision',
+            'draft_title',
+            'slug',
+            'url_path',
+            'owner',
+            'latest_revision_created_at',
+            'seo_title',
+            'search_description',
+            'show_in_menus',
+            'has_unpublished_changes',
+            'go_live_at',
+            'expire_at',
+            'expired',
+            'locked',
+            'locked_at',
+            'locked_by',
+        }
+
+        field_names = []
+        for f in model._meta.get_fields():
+            # Skip auto-created or reverse relations
+            if getattr(f, 'auto_created', False):
+                continue
+            # Only include concrete model fields
+            if not isinstance(f, Field):
+                continue
+            if f.name in exclude_names:
+                continue
+            field_names.append(f.name)
+
+        return field_names
+
+    def _get_pages_to_index(self, model_names=None, exclude_models=None, model_fields_map=None, page_id=None):
         """
         Get pages to index based on model selection.
 
@@ -410,7 +515,6 @@ class Command(BaseCommand):
             model_names: List of specific model names to include
             exclude_models: List of model names to exclude
             model_fields_map: Dict mapping model names to important fields
-            important_fields: Global list of important fields for all models
             page_id: Specific page ID to re-index (if provided, only this page is indexed)
 
         Returns:
@@ -433,6 +537,17 @@ class Command(BaseCommand):
         # Extract text from each page
         for model in page_models:
             model_name = f"{model._meta.app_label}.{model.__name__}"
+
+            # Resolve important fields for this model.
+            # Special case: ['*'] means "all content fields on this model".
+            raw_model_fields = model_fields_map.get(model_name, [])
+            if raw_model_fields == ['*']:
+                try:
+                    model_important_fields = self._get_all_content_field_names(model)
+                except Exception:
+                    model_important_fields = []
+            else:
+                model_important_fields = raw_model_fields
 
             # If page_id is specified, only get that specific page
             if page_id:
@@ -460,12 +575,10 @@ class Command(BaseCommand):
             for page in live_pages:
                 try:
                     # Get important fields for this specific model
-                    model_important_fields = model_fields_map.get(model_name, [])
-                    # Combine with global important fields
-                    all_important_fields = list(set((important_fields or []) + model_important_fields))
-
-                    page_text = self._extract_page_text(page,
-                                                        important_fields=all_important_fields if all_important_fields else None)
+                    page_text = self._extract_page_text(
+                        page,
+                        important_fields=model_important_fields if model_important_fields else None,
+                    )
                     if page_text.strip():  # Only add non-empty text
                         pages.append(page_text)
 
@@ -480,26 +593,44 @@ class Command(BaseCommand):
                             'slug': page.slug if hasattr(page, 'slug') else '',
                         }
 
+                        # Always print the extracted text for debugging/inspection
+                        separator = '=' * 80
+                        self.stdout.write(separator)
+                        self.stdout.write(
+                            f'Page: {page_metadata["model"]} (ID: {page_metadata["id"]}) '
+                            f'- "{page_metadata["title"]}"'
+                        )
+                        self.stdout.write('-' * 80)
+                        self.stdout.write(page_text)
+                        self.stdout.write('\n')
+
                         # Add any important fields to metadata generically
-                        if all_important_fields:
-                            for field_name in all_important_fields:
+                        if model_important_fields:
+                            for field_name in model_important_fields:
                                 if hasattr(page, field_name):
                                     value = getattr(page, field_name, None)
-                                    if value:
-                                        # Handle ForeignKey
-                                        if hasattr(value, 'title'):
-                                            page_metadata[field_name] = value.title
-                                        elif hasattr(value, 'name'):
-                                            page_metadata[field_name] = value.name
+                                    if value is not None:
+                                        # Handle ForeignKey and strings safely
+                                        if hasattr(value, 'title') and not isinstance(value, str):
+                                            attr = getattr(value, 'title')
+                                            page_metadata[field_name] = attr() if callable(attr) else attr
+                                        elif hasattr(value, 'name') and not isinstance(value, str):
+                                            attr = getattr(value, 'name')
+                                            page_metadata[field_name] = attr() if callable(attr) else attr
                                         # Handle ManyToMany
                                         elif hasattr(value, 'all'):
                                             items = value.all()
                                             if items:
                                                 page_metadata[field_name] = ', '.join([
-                                                    getattr(item, 'name', getattr(item, 'title', str(item)))
+                                                    getattr(
+                                                        item,
+                                                        'name',
+                                                        getattr(item, 'title', str(item)),
+                                                    )
                                                     for item in items
                                                 ])
                                         else:
+                                            # Fallback: cast to string
                                             page_metadata[field_name] = str(value)
 
                         metadata.append(page_metadata)
@@ -517,7 +648,6 @@ class Command(BaseCommand):
         model_names = options['models'] or getattr(settings, 'WAGTAIL_RAG_MODELS', None)
         exclude_models = options['exclude_models'] or []
         model_fields_arg = options['model_fields'] or []
-        important_fields = options['important_fields'] or []
         chunk_size = options['chunk_size'] or getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 1000)
         chunk_overlap = options['chunk_overlap'] or getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 200)
         collection_name = options['collection_name']
@@ -533,10 +663,6 @@ class Command(BaseCommand):
         )
         exclude_models = list(set(exclude_models + default_excludes))
         
-        # Get default important fields from settings if not provided via CLI
-        if not important_fields:
-            important_fields = getattr(settings, 'WAGTAIL_RAG_IMPORTANT_FIELDS', [])
-        
         # Get default model-specific fields from settings if not provided via CLI
         if not model_fields_arg:
             model_fields_arg = getattr(settings, 'WAGTAIL_RAG_MODEL_FIELDS', [])
@@ -549,8 +675,6 @@ class Command(BaseCommand):
         
         if model_fields_map:
             self.stdout.write(f'Model-specific important fields: {model_fields_map}')
-        if important_fields:
-            self.stdout.write(f'Global important fields: {important_fields}')
 
         # Get collection name from settings or use default
         if not collection_name:
@@ -582,8 +706,6 @@ class Command(BaseCommand):
         self.stdout.write(f'Collection name: {collection_name}')
         
         # Important fields
-        if important_fields:
-            self.stdout.write(f'Global important fields: {", ".join(important_fields)}')
         if model_fields_map:
             self.stdout.write(f'Model-specific fields: {model_fields_map}')
         
@@ -615,6 +737,35 @@ class Command(BaseCommand):
         self.stdout.write('=' * 60)
         self.stdout.write('')
         
+        # If we only want to reset the collection, do it now and exit
+        if reset_only:
+            self.stdout.write('Resetting collection (reset-only mode)...')
+            # Initialize embeddings and persistence directory just for Chroma connection
+            embeddings = get_embeddings(
+                provider=embedding_provider,
+                model_name=embedding_model
+            )
+            persist_directory = getattr(
+                settings,
+                'WAGTAIL_RAG_CHROMA_PATH',
+                os.path.join(settings.BASE_DIR, 'chroma_db')
+            )
+            os.makedirs(persist_directory, exist_ok=True)
+
+            try:
+                existing_db = Chroma(
+                    persist_directory=persist_directory,
+                    collection_name=collection_name,
+                    embedding_function=embeddings
+                )
+                existing_db.delete_collection()
+                self.stdout.write(self.style.SUCCESS(f'Collection "{collection_name}" cleared successfully'))
+            except Exception as e:
+                self.stdout.write(self.style.WARNING(f'Collection may not exist: {e}'))
+
+            self.stdout.write(self.style.SUCCESS('Reset-only complete. No indexing performed.'))
+            return
+
         self.stdout.write('Starting RAG index building...')
         
         # Get pages to index
@@ -630,7 +781,6 @@ class Command(BaseCommand):
             model_names=model_names,
             exclude_models=exclude_models,
             model_fields_map=model_fields_map,
-            important_fields=important_fields,
             page_id=page_id
         )
 
@@ -690,18 +840,11 @@ class Command(BaseCommand):
 
         # Initialize embeddings
         self.stdout.write('Initializing embeddings...')
-        embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
-        embedding_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None)
-        self.stdout.write(f'Embedding provider: {embedding_provider}')
-        if embedding_model:
-            self.stdout.write(f'Embedding model: {embedding_model}')
-        else:
-            self.stdout.write(f'Embedding model: default for {embedding_provider}')
         embeddings = get_embeddings(
             provider=embedding_provider,
             model_name=embedding_model
         )
-
+        
         # Set up ChromaDB persistence directory
         persist_directory = getattr(
             settings,
@@ -740,29 +883,18 @@ class Command(BaseCommand):
             pass
 
         # Reset collection if requested (need embeddings for Chroma connection)
-        if reset or reset_only:
-            embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
-            embedding_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None)
-            temp_embeddings = get_embeddings(
-                provider=embedding_provider,
-                model_name=embedding_model
-            )
+        if reset:
             self.stdout.write(f'Resetting collection: {collection_name}')
             try:
                 existing_db = Chroma(
                     persist_directory=persist_directory,
                     collection_name=collection_name,
-                    embedding_function=temp_embeddings
+                    embedding_function=embeddings
                 )
                 existing_db.delete_collection()
                 self.stdout.write(self.style.SUCCESS(f'Collection "{collection_name}" cleared successfully'))
             except Exception as e:
                 self.stdout.write(self.style.WARNING(f'Collection may not exist: {e}'))
-
-        # If reset-only, exit here without indexing
-        if reset_only:
-            self.stdout.write(self.style.SUCCESS('Reset complete. No indexing performed.'))
-            return
 
         # Create/update vector store with deterministic IDs
         self.stdout.write(f'Storing chunks in ChromaDB (collection: {collection_name})...')

@@ -252,7 +252,7 @@ from wagtail_rag.rag_chatbot import get_chatbot
 # Get chatbot instance (uses settings defaults)
 chatbot = get_chatbot()
 
-# Query the chatbot
+# Query the chatbot (this calls the LLM under the hood)
 result = chatbot.query("What types of bread do you have?")
 print(result['answer'])
 print(result['sources'])
@@ -269,8 +269,8 @@ chatbot_openai = get_chatbot(
 )
 result = chatbot_openai.query("What content do you have?")
 
-# Search without generating response
-results = chatbot.search_similar("multigrain bread", k=10)
+# Search without generating response (embedding search only, no LLM)
+results = chatbot.search_with_embeddings("multigrain bread", k=10)
 for result in results:
     print(f"Title: {result['metadata']['title']}")
     print(f"Score: {result['score']}")
