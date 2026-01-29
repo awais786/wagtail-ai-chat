@@ -6,11 +6,13 @@ from django.conf import settings
 from wagtail.models import Page
 
 try:
-    from .content_extraction import extract_page_content, get_page_url
+    from .content_extraction import extract_page_content, get_page_url, wagtail_page_to_documents
 
     CONTENT_EXTRACTION_AVAILABLE = True
+    WAGTAIL_PAGE_TO_DOCS_AVAILABLE = True
 except ImportError:
     CONTENT_EXTRACTION_AVAILABLE = False
+    WAGTAIL_PAGE_TO_DOCS_AVAILABLE = False
 
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -40,39 +42,39 @@ except ImportError:
 try:
     from wagtail_rag.embeddings import get_embeddings
 except ImportError:
-    # Fallback for older installations
+    # Fallback for older installations - try multiple import paths
+    _fallback_embeddings_available = False
+    
+    # Try langchain_huggingface first
     try:
         from langchain_huggingface import HuggingFaceEmbeddings
-
-        def get_embeddings(provider=None, model_name=None, **kwargs):
-            if provider and provider.lower() not in ("huggingface", "hf", None):
-                raise ValueError(
-                    f"Only HuggingFace embeddings available. Requested: {provider}"
-                )
-            return HuggingFaceEmbeddings(
-                model_name=model_name or "sentence-transformers/all-MiniLM-L6-v2",
-                **kwargs,
-            )
-
+        _fallback_embeddings_available = True
+        _HuggingFaceEmbeddings = HuggingFaceEmbeddings
     except ImportError:
+        # Try langchain_community as fallback
         try:
             from langchain_community.embeddings import HuggingFaceEmbeddings
-
-            def get_embeddings(provider=None, model_name=None, **kwargs):
-                if provider and provider.lower() not in ("huggingface", "hf", None):
-                    raise ValueError(
-                        f"Only HuggingFace embeddings available. Requested: {provider}"
-                    )
-                return HuggingFaceEmbeddings(
-                    model_name=model_name or "sentence-transformers/all-MiniLM-L6-v2",
-                    **kwargs,
-                )
-
+            _fallback_embeddings_available = True
+            _HuggingFaceEmbeddings = HuggingFaceEmbeddings
         except ImportError:
-            raise ImportError(
-                "Could not import embeddings. "
-                "Please install langchain-huggingface or langchain-community"
+            pass
+    
+    if not _fallback_embeddings_available:
+        raise ImportError(
+            "Could not import embeddings. "
+            "Please install wagtail-rag[embeddings] or langchain-huggingface or langchain-community"
+        )
+    
+    def get_embeddings(provider=None, model_name=None, **kwargs):
+        """Fallback embedding function for older installations."""
+        if provider and provider.lower() not in ("huggingface", "hf", None):
+            raise ValueError(
+                f"Only HuggingFace embeddings available in fallback mode. Requested: {provider}"
             )
+        return _HuggingFaceEmbeddings(
+            model_name=model_name or "sentence-transformers/all-MiniLM-L6-v2",
+            **kwargs,
+        )
 
 
 # Type alias for an optional output function (e.g. management command stdout.write)
@@ -254,12 +256,33 @@ def get_pages_to_index(
     model_fields_map: Optional[Dict[str, List[str]]] = None,
     page_id: Optional[int] = None,
     stdout: WriteFn = None,
-) -> Tuple[List[str], List[Dict[str, Any]]]:
+    use_document_approach: bool = True,
+) -> Tuple[List[Any], List[Dict[str, Any]]]:
     """
-    Public helper that collects texts and metadata for pages to index.
-    Mirrors the behaviour previously embedded in the management command.
+    Public helper that collects documents and metadata for pages to index.
+    
+    Args:
+        use_document_approach: If True, uses wagtail_page_to_documents (new approach).
+                              If False, uses old text extraction approach.
+    
+    Returns:
+        Tuple of (documents/texts, metadata list)
+        - If use_document_approach=True: (List[Document], List[Dict])
+        - If use_document_approach=False: (List[str], List[Dict])
     """
     model_fields_map = model_fields_map or {}
+    
+    # Use new document-based approach by default
+    if use_document_approach and WAGTAIL_PAGE_TO_DOCS_AVAILABLE:
+        return _get_pages_as_documents(
+            model_names=model_names,
+            exclude_models=exclude_models,
+            model_fields_map=model_fields_map,
+            page_id=page_id,
+            stdout=stdout,
+        )
+    
+    # Fallback to old text-based approach
     pages: List[str] = []
     metadata: List[Dict[str, Any]] = []
 
@@ -354,6 +377,113 @@ def get_pages_to_index(
     return pages, metadata
 
 
+def _get_pages_as_documents(
+    model_names: Optional[Iterable[str]] = None,
+    exclude_models: Optional[Iterable[str]] = None,
+    model_fields_map: Optional[Dict[str, List[str]]] = None,
+    page_id: Optional[int] = None,
+    stdout: WriteFn = None,
+) -> Tuple[List[Any], List[Dict[str, Any]]]:
+    """
+    Get pages as Document objects using the new wagtail_page_to_documents approach.
+    
+    Note: model_fields_map is accepted for API consistency but not currently used
+    in the document-based approach. The new approach extracts content from standard
+    Wagtail fields (title, intro, body, content, etc.) automatically.
+    
+    Returns:
+        Tuple of (List[Document], List[Dict]) where each Document has its own metadata
+    """
+    from django.conf import settings
+    
+    # model_fields_map is kept for API consistency but not used in document approach
+    # The new wagtail_page_to_documents handles field extraction automatically
+    _ = model_fields_map  # Suppress unused variable warning
+    documents: List[Any] = []
+    all_metadata: List[Dict[str, Any]] = []
+    
+    # Get chunk size/overlap from settings
+    chunk_size = getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 500)
+    chunk_overlap = getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 75)
+    
+    page_models = _get_page_models(model_names=model_names, exclude_models=exclude_models)
+    if not page_models:
+        _write(stdout, "No page models found to index.")
+        return documents, all_metadata
+
+    _write(stdout, f"Found {len(page_models)} page model(s) to index:")
+    for model in page_models:
+        _write(stdout, f"  - {model._meta.app_label}.{model.__name__}")
+
+    for model in page_models:
+        model_name = f"{model._meta.app_label}.{model.__name__}"
+
+        if page_id:
+            try:
+                live_pages = model.objects.filter(id=page_id, live=True)
+                if not live_pages.exists():
+                    continue
+                _write(stdout, f"  Re-indexing page ID {page_id} from {model_name}...")
+            except Exception as e:
+                _write(stdout, f"  Error finding page {page_id} in {model_name}: {e}")
+                continue
+        else:
+            live_pages = model.objects.live()
+
+        count = live_pages.count()
+        if count == 0:
+            if not page_id:
+                _write(stdout, f"  No live pages found for {model_name}")
+            continue
+
+        if not page_id:
+            _write(stdout, f"  Indexing {count} pages from {model_name}...")
+
+        for page in live_pages:
+            try:
+                # Use new document-based approach
+                page_docs = wagtail_page_to_documents(
+                    page,
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
+                    stdout=stdout,  # Pass stdout to print documents
+                )
+                
+                if not page_docs:
+                    continue
+
+                # Add model-level metadata to each document
+                for doc in page_docs:
+                    doc.metadata.update({
+                        "source": model_name,
+                        "model": model.__name__,
+                        "app": model._meta.app_label,
+                    })
+                    documents.append(doc)
+                    all_metadata.append(doc.metadata)
+
+                # Log page extraction summary (detailed document output is handled by wagtail_page_to_documents)
+                separator = "=" * 80
+                _write(stdout, separator)
+                _write(
+                    stdout,
+                    f'Page: {model.__name__} (ID: {page.id}) - "{page.title}" - {len(page_docs)} documents',
+                )
+                _write(stdout, "-" * 80)
+                
+            except Exception as e:
+                page_id_str = str(getattr(page, 'id', 'unknown'))
+                _write(
+                    stdout,
+                    f"  Error extracting documents from {model_name} (ID: {page_id_str}): {e}",
+                )
+                import traceback
+                if stdout:
+                    _write(stdout, f"  Traceback: {traceback.format_exc()}")
+
+    return documents, all_metadata
+
+
 def build_rag_index(
     *,
     model_names: Optional[Iterable[str]] = None,
@@ -406,8 +536,9 @@ def build_rag_index(
         model_fields_arg = getattr(settings, "WAGTAIL_RAG_MODEL_FIELDS", None)
 
     # Resolve other configuration from settings
-    chunk_size = getattr(settings, "WAGTAIL_RAG_CHUNK_SIZE", 1000)
-    chunk_overlap = getattr(settings, "WAGTAIL_RAG_CHUNK_OVERLAP", 200)
+    # Note: Defaults match the new document-based approach (500/75)
+    chunk_size = getattr(settings, "WAGTAIL_RAG_CHUNK_SIZE", 500)
+    chunk_overlap = getattr(settings, "WAGTAIL_RAG_CHUNK_OVERLAP", 75)
     collection_name = getattr(
         settings,
         "WAGTAIL_RAG_COLLECTION_NAME",
@@ -478,75 +609,111 @@ def build_rag_index(
     if exclude_models:
         _write(stdout, f"Excluding models: {', '.join(exclude_models)}")
 
-    texts, metadatas = get_pages_to_index(
+    pages_data, metadatas = get_pages_to_index(
         model_names=model_names,
         exclude_models=exclude_models,
         model_fields_map=model_fields_map,
         page_id=page_id,
         stdout=stdout,
+        use_document_approach=True,  # Use new document-based approach
     )
 
-    if not texts:
+    if not pages_data:
         _write(stdout, "No pages found to index.")
         return
 
-    _write(stdout, f"Extracted {len(texts)} pages")
-
-    # Split into chunks
-    _write(
-        stdout,
-        f"Chunking text (size: {chunk_size}, overlap: {chunk_overlap})...",
-    )
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        length_function=len,
-    )
-
-    chunks: List[str] = []
-    chunk_metadatas: List[Dict[str, Any]] = []
-    chunk_ids: List[str] = []
-
-    for text, metadata in zip(texts, metadatas):
-        text_chunks = text_splitter.split_text(text)
-
-        prefix_parts = [f"Title: {metadata.get('title', 'Unknown')}"]
-        exclude_from_prefix = {
-            "source",
-            "model",
-            "app",
-            "id",
-            "slug",
-            "url",
-            "chunk_index",
-            "total_chunks",
-        }
-        for key, value in metadata.items():
-            if key not in exclude_from_prefix and value:
-                prefix_parts.append(f"{key.replace('_', ' ').title()}: {value}")
-
-        prefix = " | ".join(prefix_parts) + "\n\n"
-
-        page_id_val = metadata.get("id")
-        app = metadata.get("app", "unknown")
-        model = metadata.get("model", "unknown")
-
-        for chunk_idx, chunk in enumerate(text_chunks):
-            chunk_with_context = prefix + chunk
-            chunks.append(chunk_with_context)
-
-            chunk_id = f"{app}_{model}_{page_id_val}_{chunk_idx}"
+    # Check if we got Document objects (new approach) or text strings (old approach)
+    is_document_approach = pages_data and hasattr(pages_data[0], 'page_content')
+    
+    if is_document_approach:
+        # New approach: pages_data is List[Document], already chunked
+        _write(stdout, f"Extracted {len(pages_data)} documents from pages")
+        chunks: List[str] = [doc.page_content for doc in pages_data]
+        chunk_metadatas: List[Dict[str, Any]] = [doc.metadata for doc in pages_data]
+        
+        # Generate deterministic chunk IDs
+        chunk_ids: List[str] = []
+        chunk_counters: Dict[str, int] = {}  # Track chunk index per page+section
+        
+        for doc in pages_data:
+            meta = doc.metadata
+            page_id_val = meta.get("page_id") or meta.get("id")
+            app = meta.get("app", "unknown")
+            model = meta.get("page_type") or meta.get("model", "unknown")
+            section = meta.get("section", "body")
+            
+            # Create unique key for this page+section combination
+            key = f"{app}_{model}_{page_id_val}_{section}"
+            chunk_idx = chunk_counters.get(key, 0)
+            chunk_counters[key] = chunk_idx + 1
+            
+            chunk_id = f"{key}_{chunk_idx}"
             chunk_ids.append(chunk_id)
+            
+            # Update metadata with chunk index
+            meta["chunk_index"] = chunk_idx
+        
+        _write(stdout, f"Using {len(chunks)} documents (already chunked with title context)")
+    else:
+        # Old approach: pages_data is List[str], need to chunk
+        texts = pages_data
+        _write(stdout, f"Extracted {len(texts)} pages")
 
-            chunk_metadatas.append(
-                {
-                    **metadata,
-                    "chunk_index": chunk_idx,
-                    "total_chunks": len(text_chunks),
-                }
-            )
+        # Split into chunks
+        _write(
+            stdout,
+            f"Chunking text (size: {chunk_size}, overlap: {chunk_overlap})...",
+        )
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            length_function=len,
+        )
 
-    _write(stdout, f"Created {len(chunks)} chunks from {len(texts)} pages")
+        chunks: List[str] = []
+        chunk_metadatas: List[Dict[str, Any]] = []
+        chunk_ids: List[str] = []
+
+        for text, metadata in zip(texts, metadatas):
+            text_chunks = text_splitter.split_text(text)
+
+            prefix_parts = [f"Title: {metadata.get('title', 'Unknown')}"]
+            exclude_from_prefix = {
+                "source",
+                "model",
+                "app",
+                "id",
+                "slug",
+                "url",
+                "chunk_index",
+                "total_chunks",
+            }
+            for key, value in metadata.items():
+                if key not in exclude_from_prefix and value:
+                    prefix_parts.append(f"{key.replace('_', ' ').title()}: {value}")
+
+            prefix = " | ".join(prefix_parts) + "\n\n"
+
+            page_id_val = metadata.get("id")
+            app = metadata.get("app", "unknown")
+            model = metadata.get("model", "unknown")
+
+            for chunk_idx, chunk in enumerate(text_chunks):
+                chunk_with_context = prefix + chunk
+                chunks.append(chunk_with_context)
+
+                chunk_id = f"{app}_{model}_{page_id_val}_{chunk_idx}"
+                chunk_ids.append(chunk_id)
+
+                chunk_metadatas.append(
+                    {
+                        **metadata,
+                        "chunk_index": chunk_idx,
+                        "total_chunks": len(text_chunks),
+                    }
+                )
+
+        _write(stdout, f"Created {len(chunks)} chunks from {len(texts)} pages")
 
     _write(stdout, "Initializing embeddings...")
     embeddings = get_embeddings(
@@ -629,7 +796,8 @@ def build_rag_index(
                             all_chunks["metadatas"]
                         ):
                             m = all_chunks["metadatas"][idx]
-                            if m and m.get("id") == page_id:
+                            # Check both 'id' (old approach) and 'page_id' (new approach)
+                            if m and (m.get("id") == page_id or m.get("page_id") == page_id):
                                 page_chunk_ids.append(chunk_id)
 
                     if page_chunk_ids:

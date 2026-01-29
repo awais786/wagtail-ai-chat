@@ -12,6 +12,7 @@ from .content_extraction import (
     get_page_url,
     extract_streamfield_text,
     clean_html,
+    wagtail_page_to_documents,
 )
 
 # Export indexing function
@@ -22,6 +23,7 @@ __all__ = [
     'get_page_url',
     'extract_streamfield_text',
     'clean_html',
+    'wagtail_page_to_documents',
     'build_rag_index',
 ]
 
