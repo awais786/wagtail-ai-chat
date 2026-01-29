@@ -304,7 +304,7 @@ class EmbeddingSearcher:
                 
                 if len(wagtail_results) == 0:
                     logger.warning(
-                        f"⚠️  Wagtail search found 0 pages for query: '{query}' (normalized: '{normalized_query}'). "
+                        f"Wagtail search found 0 pages for query: '{query}' (normalized: '{normalized_query}'). "
                         f"This might mean:\n"
                         f"  1. No pages contain this keyword in their searchable content\n"
                         f"  2. Wagtail search index needs to be updated (run: python manage.py update_index)\n"
@@ -334,23 +334,23 @@ class EmbeddingSearcher:
             
             if skipped_count > 0:
                 logger.info(
-                    f"ℹ️  Deduplication: Skipped {skipped_count} out of {len(wagtail_results)} Wagtail pages "
+                    f"Deduplication: Skipped {skipped_count} out of {len(wagtail_results)} Wagtail pages "
                     f"for query: '{query}' because they were already found in vector search. "
                     f"This is expected behavior - preventing duplicate results."
                 )
                 
             if skipped_count == len(wagtail_results) and len(wagtail_results) > 0:
                 logger.info(
-                    f"ℹ️  All {len(wagtail_results)} Wagtail search results were duplicates of vector search results "
+                    f"All {len(wagtail_results)} Wagtail search results were duplicates of vector search results "
                     f"for query: '{query}'. This means:\n"
-                    f"  ✓ Wagtail search is working correctly\n"
-                    f"  ✓ Vector search already found all relevant pages\n"
-                    f"  ✓ No duplicate results will be returned (good!)\n"
-                    f"  ℹ️  This is normal when your content is well-indexed in the vector database"
+                    f"  - Wagtail search is working correctly\n"
+                    f"  - Vector search already found all relevant pages\n"
+                    f"  - No duplicate results will be returned (good!)\n"
+                    f"  - This is normal when your content is well-indexed in the vector database"
                 )
         except Exception as e:
             # Log exception but keep search resilient in non-Wagtail environments
-            logger.warning(f"⚠️  Wagtail search failed for query '{query}': {e}", exc_info=True)
+            logger.warning(f"Wagtail search failed for query '{query}': {e}", exc_info=True)
 
         return docs
 
@@ -440,45 +440,45 @@ class EmbeddingSearcher:
             List of Document objects ranked by relevance
         """
         # Step 1: Always perform vector search (primary search method)
-        logger.warning(f"🔍 STEP 1: Vector Search - Starting vector search for query: '{query}'")
+        logger.warning(f"STEP 1: Vector Search - Starting vector search for query: '{query}'")
         vector_docs, seen_urls, seen_ids = self._get_vector_docs(query)
-        logger.warning(f"✅ STEP 1: Vector Search - Found {len(vector_docs)} documents for query: '{query}'")
+        logger.warning(f"STEP 1: Vector Search - Found {len(vector_docs)} documents for query: '{query}'")
         
         # Step 2: Optionally add Wagtail search results (only if hybrid search is enabled)
         wagtail_docs = []
         if self.use_hybrid_search:
-            logger.warning(f"🔍 STEP 2: Hybrid Search (Wagtail) - Starting Wagtail search for query: '{query}'")
+            logger.warning(f"STEP 2: Hybrid Search (Wagtail) - Starting Wagtail search for query: '{query}'")
             wagtail_docs = self._get_wagtail_docs(query, seen_urls, seen_ids)
-            logger.warning(f"✅ STEP 2: Hybrid Search (Wagtail) - Found {len(wagtail_docs)} additional documents (after deduplication) for query: '{query}'")
+            logger.warning(f"STEP 2: Hybrid Search (Wagtail) - Found {len(wagtail_docs)} additional documents (after deduplication) for query: '{query}'")
             
             # Warn if Wagtail search didn't add any new results
             if len(wagtail_docs) == 0 and len(vector_docs) > 0:
                 logger.info(
-                    f"ℹ️  Hybrid search enabled for query: '{query}'. "
+                    f"Hybrid search enabled for query: '{query}'. "
                     f"Vector search found {len(vector_docs)} documents. "
                     f"Wagtail search found 0 additional unique documents (all were duplicates or no matches). "
                     f"This is normal - it means your vector search is comprehensive and already found all relevant pages."
                 )
             elif len(wagtail_docs) == 0 and len(vector_docs) == 0:
                 logger.warning(
-                    f"⚠️  Both vector and Wagtail search returned 0 results for query: '{query}'. "
+                    f"Both vector and Wagtail search returned 0 results for query: '{query}'. "
                     f"Consider:\n"
                     f"  1. Checking if content is indexed (run: python manage.py build_rag_index)\n"
                     f"  2. Updating Wagtail search index (run: python manage.py update_index)\n"
                     f"  3. Verifying the query matches your content"
                 )
         else:
-            logger.warning(f"⏭️  STEP 2: Hybrid Search (Wagtail) - Skipped (hybrid search disabled)")
+            logger.warning(f"STEP 2: Hybrid Search (Wagtail) - Skipped (hybrid search disabled)")
         # If use_hybrid_search is False, wagtail_docs will be empty list
 
         # Step 3: Combine results (vector search + optional Wagtail search)
         all_docs = vector_docs + wagtail_docs
-        logger.warning(f"📊 STEP 2 Summary: Total documents after combining: {len(all_docs)} (vector: {len(vector_docs)}, wagtail: {len(wagtail_docs)})")
+        logger.warning(f"STEP 2 Summary: Total documents after combining: {len(all_docs)} (vector: {len(vector_docs)}, wagtail: {len(wagtail_docs)})")
         
         # Info message if results are the same as vector-only (this is actually good - means comprehensive indexing)
         if self.use_hybrid_search and len(wagtail_docs) == 0 and len(all_docs) == len(vector_docs) and len(vector_docs) > 0:
             logger.info(
-                f"ℹ️  Hybrid search results for query: '{query}': "
+                f"Hybrid search results for query: '{query}': "
                 f"Returning {len(all_docs)} documents from vector search. "
                 f"Wagtail search verified these results (no additional unique pages found). "
                 f"This indicates your vector database has comprehensive coverage of your content."
@@ -494,7 +494,7 @@ class EmbeddingSearcher:
         if boost_title_matches and docs:
             docs = self._rerank_by_title_match(query, docs)
 
-        logger.warning(f"✅ Search Complete: Returning {len(docs)} documents for query: '{query}'")
+        logger.warning(f"Search Complete: Returning {len(docs)} documents for query: '{query}'")
         return docs
 
     def _deduplicate_results(self, raw_results: List[Tuple[Document, float]], k: int) -> List[Tuple[Document, float]]:
