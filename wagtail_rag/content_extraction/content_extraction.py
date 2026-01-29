@@ -7,22 +7,9 @@ handling StreamFields, RichTextFields, and other common Wagtail field types.
 
 import html
 import re
-from typing import List, Optional, Callable
+from typing import Optional
 
 from wagtail.models import Page
-
-# Try to import Document class
-try:
-    from langchain_core.documents import Document  # type: ignore
-except ImportError:
-    try:
-        from langchain.schema import Document  # type: ignore
-    except ImportError:
-        # Fallback Document class
-        class Document:  # pragma: no cover
-            def __init__(self, page_content: str, metadata: Optional[dict] = None):
-                self.page_content = page_content
-                self.metadata = metadata or {}
 
 
 def get_page_url(page: Page) -> str:
@@ -247,149 +234,8 @@ def clean_html(text: str) -> str:
     return text.strip()
 
 
-def wagtail_page_to_documents(
-    page: Page,
-    chunk_size: int = 500,
-    chunk_overlap: int = 75,
-    streamfield_fields: Optional[List[str]] = None,
-    stdout: Optional[Callable[[str], None]] = None,
-) -> List[Document]:
-    """
-    Convert a Wagtail page to multiple Document objects with intelligent chunking.
-    
-    This approach creates separate documents for title/intro and chunks body content
-    with title context, providing better semantic separation and retrieval.
-    
-    Args:
-        page: Wagtail Page instance (will be converted to specific page)
-        chunk_size: Size of text chunks (default: 500)
-        chunk_overlap: Overlap between chunks (default: 75)
-        streamfield_fields: List of StreamField field names to extract (default: ['body', 'content'])
-        stdout: Optional output function to print documents (for debugging)
-    
-    Returns:
-        List of Document objects ready for indexing
-    """
-    from django.conf import settings
-    
-    # Get chunk size/overlap from settings if not provided
-    if chunk_size == 500:
-        chunk_size = getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 500)
-    if chunk_overlap == 75:
-        chunk_overlap = getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 75)
-    
-    # Default streamfield fields
-    if streamfield_fields is None:
-        streamfield_fields = ['body', 'content', 'backstory', 'instructions']
-    
-    # Get specific page type
-    page = page.specific
-    documents = []
-
-    base_metadata = {
-        "page_id": page.id,
-        "page_type": page.__class__.__name__,
-        "slug": getattr(page, "slug", ""),
-        "title": page.title,
-        "url": get_page_url(page),
-    }
-
-    # 1. Title (strong semantic anchor)
-    title_doc = Document(
-        page_content=f"Title: {page.title}",
-        metadata={**base_metadata, "section": "title"},
-    )
-    documents.append(title_doc)
-    
-    if stdout:
-        stdout(f"  [Document 1] Section: title")
-        stdout(f"    Content: {title_doc.page_content}")
-        stdout(f"    Metadata: {title_doc.metadata}")
-        stdout("")
-
-    # 2. Intro / lead (if exists) - check multiple common field names
-    intro_fields = ['intro', 'introduction', 'lead', 'summary', 'description']
-    intro_text = None
-    for field_name in intro_fields:
-        if hasattr(page, field_name):
-            value = getattr(page, field_name, None)
-            if value:
-                intro_text = _get_field_value(value)
-                if intro_text:
-                    break
-    
-    if intro_text:
-        intro_doc = Document(
-            page_content=f"Introduction: {intro_text}",
-            metadata={**base_metadata, "section": "intro"},
-        )
-        documents.append(intro_doc)
-        
-        if stdout:
-            stdout(f"  [Document {len(documents)}] Section: intro")
-            stdout(f"    Content: {intro_doc.page_content[:200]}{'...' if len(intro_doc.page_content) > 200 else ''}")
-            stdout(f"    Metadata: {intro_doc.metadata}")
-            stdout("")
-
-    # 3. Extract StreamField blocks
-    body_texts = []
-    for field_name in streamfield_fields:
-        if hasattr(page, field_name):
-            field_value = getattr(page, field_name, None)
-            if field_value:
-                # Extract text from StreamField - get all text first, then chunk
-                streamfield_text = extract_streamfield_text(field_value)
-                if streamfield_text and streamfield_text.strip():
-                    body_texts.append({
-                        "text": streamfield_text,
-                        "field": field_name,
-                        "metadata": {
-                            **base_metadata,
-                            "section": "body",
-                            "field": field_name,
-                        }
-                    })
-
-    # 4. Chunk body intelligently with title context
-    if body_texts:
-        try:
-            from langchain_text_splitters import RecursiveCharacterTextSplitter
-        except ImportError:
-            try:
-                from langchain.text_splitters import RecursiveCharacterTextSplitter
-            except ImportError:
-                from langchain.text_splitter import RecursiveCharacterTextSplitter
-        
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", ". ", " "],
-        )
-
-        for body_item in body_texts:
-            chunks = splitter.split_text(body_item["text"])
-            if stdout:
-                stdout(f"  Field: {body_item['field']} - Split into {len(chunks)} chunks")
-            
-            for chunk_idx, chunk in enumerate(chunks):
-                # Include title for context (improves semantic understanding)
-                chunk_doc = Document(
-                    page_content=f"Title: {page.title}\n\n{chunk}",
-                    metadata={**body_item["metadata"], "chunk_index": chunk_idx},
-                )
-                documents.append(chunk_doc)
-                
-                if stdout:
-                    stdout(f"  [Document {len(documents)}] Section: {body_item['metadata'].get('section', 'body')}, Chunk {chunk_idx + 1}/{len(chunks)}")
-                    stdout(f"    Content: {chunk_doc.page_content[:300]}{'...' if len(chunk_doc.page_content) > 300 else ''}")
-                    stdout(f"    Metadata: {chunk_doc.metadata}")
-                    stdout("")
-
-    if stdout:
-        stdout(f"  Total documents created: {len(documents)}")
-        stdout("")
-
-    return documents
+# wagtail_page_to_documents has been moved to extractors.py
+# This function is now available via: from wagtail_rag.content_extraction.extractors import wagtail_page_to_documents
 
 
 
