@@ -371,6 +371,9 @@ def build_rag_index(
     if model_names is None:
         model_names = getattr(settings, "WAGTAIL_RAG_MODELS", None)
 
+    # Initialize model_fields_arg (will be set from shorthand or settings)
+    model_fields_arg: Optional[Any] = None
+
     # Support convenience syntax "app.Model:*" in WAGTAIL_RAG_MODELS / model_names.
     #
     # Example:
@@ -397,6 +400,10 @@ def build_rag_index(
         # If we have shorthand-generated model fields, use them
         if auto_model_fields:
             model_fields_arg = auto_model_fields
+
+    # If no model_fields_arg from shorthand, try to get from settings
+    if model_fields_arg is None:
+        model_fields_arg = getattr(settings, "WAGTAIL_RAG_MODEL_FIELDS", None)
 
     # Resolve other configuration from settings
     chunk_size = getattr(settings, "WAGTAIL_RAG_CHUNK_SIZE", 1000)
