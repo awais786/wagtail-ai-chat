@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from wagtail_rag.indexing import build_rag_index
+from wagtail_rag.content_extraction import build_rag_index
 
 
 class Command(BaseCommand):

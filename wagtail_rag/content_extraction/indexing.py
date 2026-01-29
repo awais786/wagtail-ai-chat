@@ -6,7 +6,7 @@ from django.conf import settings
 from wagtail.models import Page
 
 try:
-    from wagtail_rag.content_extraction import extract_page_content, get_page_url
+    from .content_extraction import extract_page_content, get_page_url
 
     CONTENT_EXTRACTION_AVAILABLE = True
 except ImportError:
