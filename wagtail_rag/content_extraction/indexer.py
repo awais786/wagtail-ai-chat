@@ -10,9 +10,12 @@ from typing import Optional, Iterable, Callable, List
 from django.conf import settings
 from django.apps import apps
 from wagtail.models import Page
-from langchain_community.vectorstores import Chroma
-
 from .extractors import wagtail_page_to_documents
+
+try:
+    from langchain_core.documents import Document
+except ImportError:
+    from langchain.schema import Document
 
 try:
     from wagtail_rag.embeddings import get_embeddings
@@ -97,44 +100,111 @@ def get_live_pages(model: type, page_id: Optional[int] = None):
 
 
 # ============================================================================
-# ChromaDB Store Wrapper
+# Vector Store Wrapper (ChromaDB or FAISS)
 # ============================================================================
 
 class ChromaStore:
     """
-    Wrapper around ChromaDB vector store with simplified operations.
+    Wrapper around vector store (ChromaDB or FAISS) with simplified operations.
+    
+    Backend is selected via WAGTAIL_RAG_VECTOR_STORE_BACKEND setting.
     
     This class handles:
-    - Collection initialization
+    - Collection/index initialization
     - Document upsertion with deterministic IDs
     - Page-level deletion
     - Collection reset
     """
     
-    def __init__(self, *, path: str, collection: str, embeddings):
+    def __init__(self, *, path: str, collection: str, embeddings, backend: Optional[str] = None):
         """
-        Initialize ChromaDB store.
+        Initialize vector store (ChromaDB or FAISS).
         
         Args:
-            path: Directory path for ChromaDB persistence
-            collection: Collection name
+            path: Directory path for persistence
+            collection: Collection/index name
             embeddings: Embedding function/model
+            backend: "chroma" or "faiss" (default: from settings)
         """
-        self.db = Chroma(
-            persist_directory=path,
-            collection_name=collection,
-            embedding_function=embeddings,
-        )
+        if backend is None:
+            backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss").lower()
+        
+        self.backend = backend
         self.path = path
         self.collection = collection
+        
+        os.makedirs(path, exist_ok=True)
+        
+        if backend == "chroma":
+            try:
+                from langchain_community.vectorstores import Chroma
+            except ImportError:
+                raise ImportError(
+                    "ChromaDB backend requires chromadb. Install with: pip install chromadb"
+                )
+            self.db = Chroma(
+                persist_directory=path,
+                collection_name=collection,
+                embedding_function=embeddings,
+            )
+        elif backend == "faiss":
+            try:
+                from langchain_community.vectorstores import FAISS
+                import faiss
+                from langchain_community.docstore.in_memory import InMemoryDocstore
+            except ImportError:
+                raise ImportError(
+                    "FAISS backend requires faiss-cpu. Install with: pip install faiss-cpu"
+                )
+            
+            # Try to load existing index
+            index_path = os.path.join(path, f"{collection}.faiss")
+            if os.path.exists(index_path):
+                try:
+                    self.db = FAISS.load_local(
+                        folder_path=path,
+                        embeddings=embeddings,
+                        allow_dangerous_deserialization=True,
+                    )
+                    return
+                except Exception:
+                    pass
+            
+            # Create new FAISS index
+            test_embedding = embeddings.embed_query("test")
+            dimension = len(test_embedding)
+            index = faiss.IndexFlatL2(dimension)
+            self.db = FAISS(
+                embedding_function=embeddings,
+                index=index,
+                docstore=InMemoryDocstore(),
+                index_to_docstore_id={},
+            )
+        else:
+            raise ValueError(f"Unknown backend: {backend}. Use 'chroma' or 'faiss'")
 
     def reset(self):
-        """Delete the entire collection."""
-        try:
-            self.db.delete_collection()
-        except Exception:
-            # Collection may not exist, which is fine
-            pass
+        """Delete the entire collection/index."""
+        if self.backend == "chroma":
+            try:
+                self.db.delete_collection()
+            except Exception:
+                pass
+        elif self.backend == "faiss":
+            # Delete FAISS files and reinitialize
+            index_path = os.path.join(self.path, f"{self.collection}.faiss")
+            pkl_path = os.path.join(self.path, f"{self.collection}.pkl")
+            for file_path in [index_path, pkl_path]:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            # Reinitialize
+            import faiss
+            from langchain_community.docstore.in_memory import InMemoryDocstore
+            test_embedding = self.db.embedding_function.embed_query("test")
+            dimension = len(test_embedding)
+            self.db.index = faiss.IndexFlatL2(dimension)
+            self.db.docstore = InMemoryDocstore()
+            self.db.index_to_docstore_id = {}
 
     def delete_page(self, page_id: int):
         """
@@ -144,25 +214,56 @@ class ChromaStore:
             page_id: The page ID to delete chunks for
         """
         try:
-            data = self.db.get(include=["ids", "metadatas"])
-            if not data or not data.get("ids"):
-                return
+            if self.backend == "chroma":
+                # ChromaDB: Get all documents with their IDs and metadata
+                data = self.db.get()
+                if not data or not data.get("ids"):
+                    return
+                
+                ids = []
+                metadatas = data.get("metadatas", [])
+                for i, doc_id in enumerate(data.get("ids", [])):
+                    if i < len(metadatas):
+                        metadata = metadatas[i]
+                        if metadata and (metadata.get("page_id") == page_id or metadata.get("id") == page_id):
+                            ids.append(doc_id)
+                
+                if ids:
+                    self.db.delete(ids=ids)
             
-            ids = []
-            for i, metadata in enumerate(data.get("metadatas", [])):
-                if metadata and (metadata.get("page_id") == page_id or metadata.get("id") == page_id):
-                    if i < len(data["ids"]):
-                        ids.append(data["ids"][i])
-            
-            if ids:
-                self.db.delete(ids=ids)
-        except Exception:
-            # If deletion fails, continue (page may not exist in store)
-            pass
+            elif self.backend == "faiss":
+                # FAISS: Find all document IDs for this page by checking index_to_docstore_id
+                ids_to_delete = []
+                
+                if hasattr(self.db, 'index_to_docstore_id') and hasattr(self.db, 'docstore'):
+                    # Iterate through all stored document IDs
+                    for doc_id in list(self.db.index_to_docstore_id.values()):
+                        try:
+                            stored_doc = self.db.docstore.search(doc_id)
+                            if isinstance(stored_doc, Document):
+                                stored_meta = stored_doc.metadata
+                                if stored_meta and (stored_meta.get("page_id") == page_id or stored_meta.get("id") == page_id):
+                                    ids_to_delete.append(doc_id)
+                        except (KeyError, AttributeError):
+                            # Document might have been deleted already, skip
+                            continue
+                
+                if ids_to_delete:
+                    self.db.delete(ids=ids_to_delete)
+                    # Save after deletion
+                    self.db.save_local(self.path, index_name=self.collection)
+        except Exception as e:
+            # Log error but don't fail - allow upsert to handle it
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error deleting page {page_id}: {e}")
 
     def upsert(self, documents: List):
         """
         Upsert documents into the store with deterministic IDs.
+        
+        This method ensures that documents with the same IDs are replaced,
+        preventing duplicates when re-indexing.
         
         Args:
             documents: List of Document objects to upsert
@@ -173,18 +274,47 @@ class ChromaStore:
         ids = []
         counters = {}
 
+        # Generate deterministic IDs based on page_id, section, and chunk index
         for doc in documents:
-            # Generate deterministic ID based on page_id and section
             page_id = doc.metadata.get("page_id") or doc.metadata.get("id", "unknown")
             section = doc.metadata.get("section", "body")
-            key = f"{page_id}_{section}"
+            chunk_index = doc.metadata.get("chunk_index")
             
-            idx = counters.get(key, 0)
-            counters[key] = idx + 1
-            ids.append(f"{key}_{idx}")
+            # chunk_index should always be set (0 for title/intro, 0+ for body chunks)
+            # If not set, default to 0
+            if chunk_index is None:
+                chunk_index = 0
+            
+            # Generate deterministic ID: {page_id}_{section}_{chunk_index}
+            doc_id = f"{page_id}_{section}_{chunk_index}"
+            ids.append(doc_id)
+            
+            # Also store the ID in metadata for reference
+            doc.metadata["doc_id"] = doc_id
 
-        # Use add_documents which handles both new and existing documents
-        self.db.add_documents(documents, ids=ids)
+        # Add documents with upsert behavior
+        if self.backend == "chroma":
+            # ChromaDB handles upsert automatically when IDs match
+            self.db.add_documents(documents, ids=ids)
+        elif self.backend == "faiss":
+            # FAISS: delete existing IDs first (simulate upsert)
+            existing_ids = []
+            if hasattr(self.db, 'index_to_docstore_id'):
+                # Check which IDs already exist
+                existing_ids = [doc_id for doc_id in ids if doc_id in self.db.index_to_docstore_id.values()]
+            
+            # Delete existing documents with these IDs
+            if existing_ids:
+                try:
+                    self.db.delete(ids=existing_ids)
+                except Exception:
+                    # If delete fails, continue - add_documents will handle duplicates
+                    pass
+            
+            # Add new documents (will overwrite if IDs match after delete)
+            self.db.add_documents(documents, ids=ids)
+            # Save FAISS to disk
+            self.db.save_local(self.path, index_name=self.collection)
 
 
 # ============================================================================
@@ -265,10 +395,11 @@ def build_rag_index(
     )
     embedding_model = getattr(settings, "WAGTAIL_RAG_EMBEDDING_MODEL", None)
     
-    # Get ChromaDB configuration
+    # Get vector store configuration
+    vector_store_backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss")
     persist_directory = getattr(
         settings,
-        "WAGTAIL_RAG_CHROMA_PATH",
+        "WAGTAIL_RAG_CHROMA_PATH",  # Path for vector store (works for both ChromaDB and FAISS)
         os.path.join(settings.BASE_DIR, "chroma_db"),
     )
     collection_name = getattr(
@@ -277,9 +408,6 @@ def build_rag_index(
         "wagtail_rag",
     )
     
-    # Ensure persist directory exists
-    os.makedirs(persist_directory, exist_ok=True)
-    
     # Initialize embeddings
     _write(stdout, "Initializing embeddings...")
     embeddings = get_embeddings(
@@ -287,11 +415,13 @@ def build_rag_index(
         model_name=embedding_model,
     )
     
-    # Initialize store
+    # Initialize store (ChromaDB or FAISS based on settings)
+    _write(stdout, f"Using {vector_store_backend.upper()} vector store backend...")
     store = ChromaStore(
         path=persist_directory,
         collection=collection_name,
         embeddings=embeddings,
+        backend=vector_store_backend,
     )
     
     # Handle reset-only mode
@@ -389,6 +519,6 @@ def build_rag_index(
     
     _write(
         stdout,
-        f'Successfully indexed {total_documents} documents in ChromaDB collection "{collection_name}"',
+        f'Successfully indexed {total_documents} documents in {vector_store_backend.upper()} "{collection_name}"',
     )
     _write(stdout, f"Vector store saved to: {persist_directory}")

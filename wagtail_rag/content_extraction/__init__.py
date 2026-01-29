@@ -33,6 +33,6 @@ __all__ = [
     # New modular components
     'get_page_models',
     'get_live_pages',
-    'ChromaStore',
+    'ChromaStore',  # Works with both ChromaDB and FAISS
 ]
 

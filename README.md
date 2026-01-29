@@ -1,11 +1,11 @@
 # Wagtail RAG Chatbot
 
-A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. This Django app provides a complete RAG solution that indexes your Wagtail pages into ChromaDB and provides a chatbot interface using LangChain with support for multiple LLM and embedding providers.
+A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. This Django app provides a complete RAG solution that indexes your Wagtail pages into FAISS and provides a chatbot interface using LangChain with support for multiple LLM and embedding providers.
 
 ## Features
 
 - **Automatic Page Indexing**: Automatically discovers and indexes all Wagtail Page models
-- **Hybrid Search**: Combines ChromaDB vector search with Wagtail's built-in full-text search
+- **Hybrid Search**: Combines FAISS vector search with Wagtail's built-in full-text search
 - **MultiQuery Retriever**: Uses LangChain's MultiQueryRetriever for better query understanding
 - **Fuzzy Matching**: Handles typos and partial matches in search queries
 - **Metadata Filtering**: Filter search results by page model, app, or custom metadata
@@ -76,9 +76,9 @@ pip install wagtail-rag[all]
 
 **Note:** You can combine multiple providers in one command, e.g., `pip install wagtail-rag[huggingface,openai]`
 
-**Note:** Core dependencies (langchain, chromadb, etc.) are automatically installed with the package. You only need to install provider-specific dependencies.
+**Note:** Core dependencies (langchain, etc.) are automatically installed with the package. You need to install at least one vector store backend (FAISS or ChromaDB) and provider-specific dependencies.
 
-### 4. Add URL Configuration (Optional, for API endpoints)
+### 5. Add URL Configuration (Optional, for API endpoints)
 
 In your main `urls.py` (e.g., `bakerydemo/urls.py`):
 ```python
@@ -94,7 +94,7 @@ After adding this, the API endpoints will be available at:
 - `http://localhost:8000/api/rag/chat/` - Chat endpoint (GET or POST)
 - `http://localhost:8000/api/rag/search/` - Search endpoint (GET or POST)
 
-### 5. Add the Global Floating Chatbox to Your Templates
+### 6. Add the Global Floating Chatbox to Your Templates
 
 To render the bundled chat/search widget on every page (floating in the bottom-right corner), include this in a base template such as `base.html`:
 
@@ -136,9 +136,9 @@ WAGTAIL_RAG_MODEL_NAME = "gpt-4"
 OPENAI_API_KEY = "sk-..."  # or configure via environment variable
 
 
-# ChromaDB configuration (common to all setups)
+# Vector Store Configuration (choose ChromaDB or FAISS)
 WAGTAIL_RAG_COLLECTION_NAME = "wagtail_rag"
-WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, "chroma_db")
+WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, "faiss_index")  # Path for FAISS index
 ```
 
 ### 2. Build the Index
@@ -178,11 +178,11 @@ print(result['answer'])
 ### Basic Settings
 
 ```python
-# ChromaDB collection name
+# FAISS index name
 WAGTAIL_RAG_COLLECTION_NAME = 'wagtail_rag'
 
-# ChromaDB persistence directory
-WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'chroma_db')
+# FAISS index directory
+WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'faiss_index')
 
 # Number of documents to retrieve (default: 8)
 WAGTAIL_RAG_RETRIEVE_K = 8
@@ -243,7 +243,7 @@ python manage.py build_rag_index
 Common variations:
 
 ```bash
-# Reset (clear) the existing Chroma collection, then rebuild the index
+# Reset (clear) the existing FAISS index, then rebuild the index
 python manage.py build_rag_index --reset
 
 # Only reset/clear the collection without indexing
@@ -408,7 +408,7 @@ curl -X POST http://localhost:8000/api/rag/search/ \
 
 2. **Querying**: The chatbot:
    - Uses MultiQueryRetriever to generate query variations
-   - Searches ChromaDB for similar chunks
+   - Searches FAISS for similar chunks
    - Optionally searches Wagtail's full-text index (hybrid search)
    - Combines and deduplicates results
    - Boosts documents with matching titles (handles typos)
@@ -416,11 +416,11 @@ curl -X POST http://localhost:8000/api/rag/search/ \
 
 ## Architecture
 
-- **Vector Store**: ChromaDB for storing embeddings
+- **Vector Store**: FAISS for storing embeddings
 - **Embeddings**: Multiple providers supported (HuggingFace, OpenAI, Sentence Transformers)
 - **LLM**: Multiple providers supported (Ollama, OpenAI; extensible to others)
 - **Framework**: LangChain for orchestration
-- **Search**: Hybrid search (ChromaDB + Wagtail full-text)
+- **Search**: Hybrid search (FAISS + Wagtail full-text)
 
 ## Troubleshooting
 
@@ -470,7 +470,7 @@ WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
 - Python 3.8+
 - Django 3.2+
 - Wagtail 4.0+
-- ChromaDB
+- FAISS
 - LangChain (core packages)
 
 **Provider Requirements** (install only what you need):

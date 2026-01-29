@@ -30,10 +30,15 @@ def _chunk_streamfield(page: Page, base_metadata: dict, chunk_size: int, chunk_o
     streamfield_fields = ['body', 'content', 'backstory', 'instructions']
     body_texts = []
     
+    if stdout:
+        stdout(f"  Checking for body content in fields: {', '.join(streamfield_fields)}")
+    
     for field_name in streamfield_fields:
         if hasattr(page, field_name):
             field_value = getattr(page, field_name, None)
             if field_value:
+                if stdout:
+                    stdout(f"  Found field '{field_name}', extracting text...")
                 streamfield_text = extract_streamfield_text(field_value)
                 if streamfield_text and streamfield_text.strip():
                     body_texts.append({
@@ -45,6 +50,17 @@ def _chunk_streamfield(page: Page, base_metadata: dict, chunk_size: int, chunk_o
                             "field": field_name,
                         }
                     })
+                    if stdout:
+                        stdout(f"  Extracted {len(streamfield_text)} characters from '{field_name}'")
+                elif stdout:
+                    stdout(f"  Field '{field_name}' exists but contains no text")
+            elif stdout:
+                stdout(f"  Field '{field_name}' exists but is None/empty")
+        elif stdout:
+            stdout(f"  Field '{field_name}' not found on page")
+    
+    if not body_texts and stdout:
+        stdout(f"  No body content found. Only title and intro will be indexed.")
 
     if body_texts:
         try:
@@ -68,14 +84,18 @@ def _chunk_streamfield(page: Page, base_metadata: dict, chunk_size: int, chunk_o
             
             for chunk_idx, chunk in enumerate(chunks):
                 # Include title for context (improves semantic understanding)
+                page_id = body_item['metadata'].get('page_id', 'unknown')
+                section = body_item['metadata'].get('section', 'body')
+                chunk_doc_id = f"{page_id}_{section}_{chunk_idx}"
                 chunk_doc = Document(
                     page_content=f"Title: {page.title}\n\n{chunk}",
-                    metadata={**body_item["metadata"], "chunk_index": chunk_idx},
+                    metadata={**body_item["metadata"], "chunk_index": chunk_idx, "doc_id": chunk_doc_id},
                 )
                 documents.append(chunk_doc)
                 
                 if stdout:
-                    stdout(f"  [Document {len(documents)}] Section: {body_item['metadata'].get('section', 'body')}, Chunk {chunk_idx + 1}/{len(chunks)}")
+                    field = body_item['metadata'].get('field', 'unknown')
+                    stdout(f"  [Document {len(documents)}] Section: {section}, Field: {field}, Chunk {chunk_idx + 1}/{len(chunks)} (ID: {chunk_doc_id})")
                     stdout(f"    Content: {chunk_doc.page_content[:300]}{'...' if len(chunk_doc.page_content) > 300 else ''}")
                     stdout(f"    Metadata: {chunk_doc.metadata}")
                     stdout("")
@@ -122,16 +142,26 @@ def wagtail_page_to_documents(
         "title": page.title,
         "url": get_page_url(page),
     }
+    
+    if stdout:
+        # Debug: Show all fields on the page
+        all_fields = [f.name for f in page._meta.get_fields() if hasattr(f, 'name')]
+        streamfield_fields = ['body', 'content', 'backstory', 'instructions']
+        found_fields = [f for f in streamfield_fields if f in all_fields]
+        if not found_fields:
+            stdout(f"  Debug: Page has {len(all_fields)} fields, but none of {streamfield_fields} were found.")
+            stdout(f"  Available fields include: {', '.join(all_fields[:20])}{'...' if len(all_fields) > 20 else ''}")
 
     # Title
+    title_doc_id = f"{base_meta['page_id']}_title_0"
     title_doc = Document(
         page_content=f"Title: {page.title}",
-        metadata={**base_meta, "section": "title"},
+        metadata={**base_meta, "section": "title", "chunk_index": 0, "doc_id": title_doc_id},
     )
     documents.append(title_doc)
     
     if stdout:
-        stdout(f"  [Document 1] Section: title")
+        stdout(f"  [Document 1] Section: title (ID: {title_doc_id})")
         stdout(f"    Content: {title_doc.page_content}")
         stdout(f"    Metadata: {title_doc.metadata}")
         stdout("")
@@ -158,14 +188,15 @@ def wagtail_page_to_documents(
                     break
     
     if intro_text:
+        intro_doc_id = f"{base_meta['page_id']}_intro_0"
         intro_doc = Document(
             page_content=f"Introduction: {intro_text}",
-            metadata={**base_meta, "section": "intro"},
+            metadata={**base_meta, "section": "intro", "chunk_index": 0, "doc_id": intro_doc_id},
         )
         documents.append(intro_doc)
         
         if stdout:
-            stdout(f"  [Document {len(documents)}] Section: intro")
+            stdout(f"  [Document {len(documents)}] Section: intro (ID: {intro_doc_id})")
             stdout(f"    Content: {intro_doc.page_content[:200]}{'...' if len(intro_doc.page_content) > 200 else ''}")
             stdout(f"    Metadata: {intro_doc.metadata}")
             stdout("")
@@ -176,6 +207,10 @@ def wagtail_page_to_documents(
 
     if stdout:
         stdout(f"  Total documents created: {len(documents)}")
+        if len(documents) == 1:
+            stdout(f"  Note: Only title document created (no intro or body content found)")
+        elif len(documents) == 2:
+            stdout(f"  Note: Title and intro created (no body content found)")
         stdout("")
 
     return documents

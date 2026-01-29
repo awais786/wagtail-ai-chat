@@ -16,13 +16,7 @@ from django.conf import settings
 # Setup logging
 logger = logging.getLogger(__name__)
 
-try:
-    from langchain_community.vectorstores import Chroma
-except ImportError:
-    raise ImportError(
-        "Could not import LangChain components. "
-        "Please install langchain-community: pip install langchain-community"
-    )
+# FAISS is imported in _create_vectorstore when needed
 
 # Try to import MultiQueryRetriever
 try:
@@ -57,10 +51,10 @@ def _is_wagtail_available():
 
 class RAGChatBot:
     """
-    RAG Chatbot that retrieves context from ChromaDB and generates responses.
+    RAG Chatbot that retrieves context from vector store (ChromaDB or FAISS) and generates responses.
 
     High‑level flow for a question:
-      1. Embed the query and retrieve the most relevant chunks from ChromaDB
+      1. Embed the query and retrieve the most relevant chunks from vector store
          (plus optional Wagtail full‑text results).
       2. Concatenate those chunks into a single context string.
       3. Call the configured LLM with a prompt that contains {context, question}.
@@ -80,9 +74,9 @@ class RAGChatBot:
         Initialize the RAG Chatbot.
         
         Args:
-            collection_name: Name of the ChromaDB collection (default: from settings)
+            collection_name: Name of the vector store collection/index (default: from settings)
             model_name: Name of the LLM model (default: from settings)
-            persist_directory: Path to ChromaDB persistence directory (default: from settings)
+            persist_directory: Path to vector store directory (default: from settings)
             metadata_filter: Dict to filter by metadata (e.g., {'model': 'BreadPage'})
             llm_provider: LLM provider type ('ollama', 'openai', 'anthropic', etc.)
             llm_kwargs: Additional kwargs to pass to LLM initialization
@@ -145,12 +139,55 @@ class RAGChatBot:
         logger.info(f"  - Search Mode: {search_mode}")
 
     def _create_vectorstore(self):
-        """Create and return the ChromaDB vectorstore."""
-        return Chroma(
-            persist_directory=self.persist_directory,
-            collection_name=self.collection_name,
-            embedding_function=self.embeddings
-        )
+        """Create and return the vectorstore (ChromaDB or FAISS)."""
+        backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss").lower()
+        
+        if backend == "chroma":
+            try:
+                from langchain_community.vectorstores import Chroma
+            except ImportError:
+                raise ImportError(
+                    "ChromaDB backend requires chromadb. Install with: pip install chromadb"
+                )
+            return Chroma(
+                persist_directory=self.persist_directory,
+                collection_name=self.collection_name,
+                embedding_function=self.embeddings
+            )
+        elif backend == "faiss":
+            try:
+                from langchain_community.vectorstores import FAISS
+                import faiss
+                from langchain_community.docstore.in_memory import InMemoryDocstore
+            except ImportError:
+                raise ImportError(
+                    "FAISS backend requires faiss-cpu. Install with: pip install faiss-cpu"
+                )
+            
+            # Try to load existing index
+            index_path = os.path.join(self.persist_directory, f"{self.collection_name}.faiss")
+            if os.path.exists(index_path):
+                try:
+                    return FAISS.load_local(
+                        folder_path=self.persist_directory,
+                        embeddings=self.embeddings,
+                        allow_dangerous_deserialization=True,
+                    )
+                except Exception:
+                    pass
+            
+            # Create new FAISS index if it doesn't exist
+            test_embedding = self.embeddings.embed_query("test")
+            dimension = len(test_embedding)
+            index = faiss.IndexFlatL2(dimension)
+            return FAISS(
+                embedding_function=self.embeddings,
+                index=index,
+                docstore=InMemoryDocstore(),
+                index_to_docstore_id={},
+            )
+        else:
+            raise ValueError(f"Unknown backend: {backend}. Use 'chroma' or 'faiss'")
 
     def _create_llm(self, llm_kwargs):
         """Create and return the LLM instance."""
@@ -270,7 +307,7 @@ class RAGChatBot:
               {
                   "content": plain-text snippet (HTML stripped),
                   "metadata": original metadata dict stored with the chunk,
-                  "score": similarity score from Chroma
+                  "score": similarity score from vector store
               }
         """
         return self.embedding_searcher.search_with_embeddings(query, k=k, metadata_filter=metadata_filter)
@@ -289,7 +326,7 @@ def get_chatbot(collection_name=None, model_name=None, metadata_filter=None, llm
     Convenience function to get a RAG chatbot instance.
     
     Args:
-        collection_name: Name of the ChromaDB collection (default: from settings)
+        collection_name: Name of the vector store collection/index (default: from settings)
         model_name: Name of the LLM model (default: from settings)
         metadata_filter: Dict to filter by metadata (e.g., {'model': 'BreadPage'}) (default: None)
         llm_provider: LLM provider type ('ollama', 'openai', 'anthropic', etc.) (default: from settings)

@@ -38,16 +38,19 @@ setup(
         "langchain>=0.1.0",
         "langchain-community>=0.0.20",
         "langchain-text-splitters>=0.0.1",
-        "chromadb>=0.4.0",
         "beautifulsoup4>=4.12.0",
         "tiktoken>=0.5.0",
     ],
     extras_require={
-        # Common local setup (HuggingFace embeddings + Ollama LLM)
-        "local": [
-            "langchain-huggingface>=0.0.1",
-            "sentence-transformers>=2.2.0",
-            "ollama>=0.1.0",
+        # Vector store backends (install at least one)
+        "faiss": [
+            "faiss-cpu>=1.7.4",
+        ],
+        "faiss-gpu": [
+            "faiss-gpu>=1.7.4",
+        ],
+        "chroma": [
+            "chromadb>=0.4.0",
         ],
         # Embedding providers (install only what you need)
         "huggingface": [
@@ -64,8 +67,17 @@ setup(
         "anthropic": [
             "langchain-anthropic>=0.0.1",
         ],
+        # Common local setup (HuggingFace embeddings + Ollama LLM + FAISS)
+        "local": [
+            "faiss-cpu>=1.7.4",
+            "langchain-huggingface>=0.0.1",
+            "sentence-transformers>=2.2.0",
+            "ollama>=0.1.0",
+        ],
         # All providers (for convenience)
         "all": [
+            "faiss-cpu>=1.7.4",
+            "chromadb>=0.4.0",
             "langchain-huggingface>=0.0.1",
             "sentence-transformers>=2.2.0",
             "langchain-openai>=0.0.1",
@@ -81,4 +93,3 @@ setup(
         ],
     },
 )
-
