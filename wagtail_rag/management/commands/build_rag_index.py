@@ -20,12 +20,9 @@ class Command(BaseCommand):
             help='Re-index a specific page by ID (useful for updates)'
         )
 
-
-
     def handle(self, *args, **options):
-        # Model configuration now comes entirely from settings (see CONFIGURATION_EXAMPLE.py)
+        # Model configuration now comes entirely from settings
         model_names = getattr(settings, 'WAGTAIL_RAG_MODELS', None)
-        model_fields_arg = None
 
         # Read configuration that will be applied by the shared indexer
         chunk_size = getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 1000)
@@ -33,7 +30,6 @@ class Command(BaseCommand):
         collection_name = getattr(settings, 'WAGTAIL_RAG_COLLECTION_NAME', 'wagtail_rag')
         reset_only = options['reset_only']
         page_id = options['page_id']
-
 
         # Display configuration being used (keep CLI UX unchanged)
         self.stdout.write('=' * 60)
@@ -48,9 +44,6 @@ class Command(BaseCommand):
         self.stdout.write(f'Chunk size: {chunk_size}')
         self.stdout.write(f'Chunk overlap: {chunk_overlap}')
         self.stdout.write(f'Collection name: {collection_name}')
-
-        if model_fields_arg:
-            self.stdout.write(f'Model-specific fields: {model_fields_arg}')
 
         embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
         embedding_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None)

@@ -38,7 +38,7 @@ except ImportError:
         )
 
 try:
-    from wagtail_rag.embedding_providers import get_embeddings
+    from wagtail_rag.embeddings import get_embeddings
 except ImportError:
     # Fallback for older installations
     try:

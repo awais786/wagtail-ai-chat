@@ -14,7 +14,7 @@ __version__ = '0.1.0'
 # during Django startup. Import directly from modules instead:
 #   from wagtail_rag.rag_chatbot import RAGChatBot, get_chatbot
 #   from wagtail_rag.llm_providers import get_llm
-#   from wagtail_rag.embedding_providers import get_embeddings
+#   from wagtail_rag.embeddings import get_embeddings
 
 __all__ = ['RAGChatBot', 'get_chatbot', 'get_llm', 'get_embeddings']
 

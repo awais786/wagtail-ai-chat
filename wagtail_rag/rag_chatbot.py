@@ -5,8 +5,8 @@ This module provides a RAG (Retrieval-Augmented Generation) chatbot
 that uses the indexed content from Wagtail pages.
 
 The chatbot orchestrates two main components:
-1. Embedding Search (embedding_search.py) - retrieves relevant documents
-2. LLM Generation (llm_generation.py) - generates answers using LLM
+1. Embedding Search (embeddings/search.py) - retrieves relevant documents
+2. LLM Generation (providers/generation.py) - generates answers using LLM
 """
 import os
 import logging
@@ -38,11 +38,12 @@ except ImportError:
 
 # Import provider factories
 from .llm_providers import get_llm
-from .embedding_providers import get_embeddings
+from .embeddings import get_embeddings
 
 # Import separated modules
-from .embedding_search import EmbeddingSearcher
-from .llm_generation import LLMGenerator, USE_LCEL
+from .llm_providers import LLMGenerator
+from .embeddings import EmbeddingSearcher
+from .llm_providers.generation import USE_LCEL
 
 
 def _is_wagtail_available():
