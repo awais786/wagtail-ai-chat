@@ -57,12 +57,6 @@ setup(
         "openai": [
             "langchain-openai>=0.0.1",
         ],
-        "cohere": [
-            "cohere>=4.0.0",
-        ],
-        "google": [
-            "langchain-google-genai>=0.0.1",
-        ],
         # LLM providers (install only what you need)
         "ollama": [
             "ollama>=0.1.0",
@@ -75,8 +69,6 @@ setup(
             "langchain-huggingface>=0.0.1",
             "sentence-transformers>=2.2.0",
             "langchain-openai>=0.0.1",
-            "cohere>=4.0.0",
-            "langchain-google-genai>=0.0.1",
             "ollama>=0.1.0",
             "langchain-anthropic>=0.0.1",
         ],

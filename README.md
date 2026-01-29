@@ -11,7 +11,7 @@ A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. Th
 - **Metadata Filtering**: Filter search results by page model, app, or custom metadata
 - **Deterministic IDs**: Enables efficient updates and single-page re-indexing
 - **Multiple LLM Providers**: Built-in support for **Ollama** (local) and **OpenAI** (hosted)
-- **Multiple Embedding Providers**: Support for OpenAI, HuggingFace, Cohere, Google, Sentence Transformers, and custom providers
+- **Multiple Embedding Providers**: Support for OpenAI, HuggingFace, and Sentence Transformers
 - **Generic & Reusable**: Works with any Wagtail project without hardcoding model names
 - **Configurable via Django Settings**: All options configurable through Django settings (no command-line args required)
 
@@ -417,7 +417,7 @@ curl -X POST http://localhost:8000/api/rag/search/ \
 ## Architecture
 
 - **Vector Store**: ChromaDB for storing embeddings
-- **Embeddings**: Multiple providers supported (HuggingFace, OpenAI, Cohere, Google, Sentence Transformers, Custom)
+- **Embeddings**: Multiple providers supported (HuggingFace, OpenAI, Sentence Transformers)
 - **LLM**: Multiple providers supported (Ollama, OpenAI; extensible to others)
 - **Framework**: LangChain for orchestration
 - **Search**: Hybrid search (ChromaDB + Wagtail full-text)
@@ -478,8 +478,6 @@ WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
 **Embedding Providers:**
 - **HuggingFace** (default): `pip install wagtail-rag[huggingface]` or `pip install langchain-huggingface sentence-transformers`
 - **OpenAI**: `pip install wagtail-rag[openai]` or `pip install langchain-openai`
-- **Cohere**: `pip install wagtail-rag[cohere]` or `pip install cohere`
-- **Google**: `pip install wagtail-rag[google]` or `pip install langchain-google-genai`
 
 **LLM Providers:**
 - **Ollama** (local): `pip install wagtail-rag[ollama]` or `pip install ollama`

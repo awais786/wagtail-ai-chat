@@ -21,16 +21,6 @@ sentence-transformers>=2.2.0
 # Or manually: pip install langchain-openai
 # langchain-openai>=0.0.1
 
-# Cohere embeddings (hosted, requires API key)
-# Install with: pip install wagtail-rag[cohere]
-# Or manually: pip install cohere
-# cohere>=4.0.0
-
-# Google embeddings (hosted, requires API key)
-# Install with: pip install wagtail-rag[google]
-# Or manually: pip install langchain-google-genai
-# langchain-google-genai>=0.0.1
-
 # ============================================================================
 # Optional: LLM Providers (install only what you need)
 # ============================================================================
