@@ -167,13 +167,31 @@ class RAGChatBot:
         
         base_retriever = self.vectorstore.as_retriever(search_kwargs=search_kwargs)
 
-        # Use MultiQueryRetriever if available and enabled
-        use_multi_query = getattr(settings, 'WAGTAIL_RAG_USE_MULTI_QUERY', True) and MULTI_QUERY_AVAILABLE
+        # Use MultiQueryRetriever if available and enabled (LLM query expansion)
+        # Check new setting name first, fallback to old name for backward compatibility
+        use_llm_query_expansion = getattr(settings, 'WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION', None)
+        if use_llm_query_expansion is None:
+            # Backward compatibility: check old setting name
+            use_llm_query_expansion = getattr(settings, 'WAGTAIL_RAG_USE_MULTI_QUERY', True)
+            if use_llm_query_expansion:
+                logger.warning(
+                    "⚠️  WAGTAIL_RAG_USE_MULTI_QUERY is deprecated. "
+                    "Please use WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION instead."
+                )
+        
+        use_multi_query = use_llm_query_expansion and MULTI_QUERY_AVAILABLE
         if use_multi_query:
+            logger.info(f"LLM Query Expansion enabled - using MultiQueryRetriever for query expansion")
             try:
                 return MultiQueryRetriever.from_llm(retriever=base_retriever, llm=self.llm)
             except Exception:
+                logger.warning("⚠️  Failed to initialize MultiQueryRetriever, falling back to base retriever")
                 pass
+        else:
+            if not MULTI_QUERY_AVAILABLE:
+                logger.info("LLM Query Expansion disabled - MultiQueryRetriever not available")
+            else:
+                logger.info("LLM Query Expansion disabled - using base retriever only")
 
         return base_retriever
 
@@ -206,25 +224,21 @@ class RAGChatBot:
               - 'sources': list of { 'content', 'metadata' } for retrieved docs
         """
         # Step 1: Retrieve documents using embedding search
+        logger.warning(f"🚀 Starting RAG pipeline for question: '{question}'")
         docs = self.embedding_searcher.retrieve_with_embeddings(question, boost_title_matches=boost_title_matches)
+        logger.warning(f"📚 Retrieved {len(docs)} documents for LLM context")
         
         # Step 2: Generate answer using LLM with retrieved context
-        if self.qa_chain is None:
-            # Simple fallback implementation
-            answer = self.llm_generator.generate_answer_with_llm(question, docs)
-            return {'answer': answer, 'sources': self._format_sources(docs)}
-
-        if USE_LCEL:
-            # LCEL pattern - chain handles retrieval + LLM generation internally
-            answer = self.qa_chain.invoke(question)
-            return {'answer': answer, 'sources': self._format_sources(docs)}
-
-        # Legacy RetrievalQA pattern
-        result = self.qa_chain({"query": question})
-        return {
-            'answer': result['result'],
-            'sources': self._format_sources(result['source_documents'])
-        }
+        logger.warning(f"🤖 STEP 3: LLM Generation - Generating answer using {self.llm_provider}/{self.model_name or 'default'} for question: '{question}'")
+        logger.warning(f"📄 Using {len(docs)} retrieved documents as context for LLM")
+        
+        # Always use the retrieved documents - don't let the chain re-retrieve
+        # This ensures we use the documents from our hybrid search (vector + Wagtail)
+        answer = self.llm_generator.generate_answer(question, docs=docs)
+        
+        logger.warning(f"✅ STEP 3: LLM Generation - Answer generated successfully")
+        logger.warning(f"📝 LLM Result: {answer[:200] if isinstance(answer, str) else str(answer)[:200]}{'...' if (len(answer) if isinstance(answer, str) else len(str(answer))) > 200 else ''}")
+        return {'answer': answer, 'sources': self._format_sources(docs)}
 
     def update_filter(self, metadata_filter):
         """

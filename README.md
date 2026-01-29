@@ -187,8 +187,8 @@ WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'chroma_db')
 # Number of documents to retrieve (default: 8)
 WAGTAIL_RAG_RETRIEVE_K = 8
 
-# Enable/disable MultiQueryRetriever (default: True)
-WAGTAIL_RAG_USE_MULTI_QUERY = True
+# Enable/disable LLM query expansion via MultiQueryRetriever
+WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION = True
 
 # Enable/disable hybrid search (default: True)
 WAGTAIL_RAG_USE_HYBRID_SEARCH = True

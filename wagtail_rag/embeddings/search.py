@@ -63,29 +63,7 @@ class EmbeddingSearcher:
         self.k_value = k_value
         self.use_hybrid_search = use_hybrid_search
 
-    # --- Internal helpers moved into the class for better encapsulation ---
-    def _get_wagtail_page_model(self):
-        """Lazy import of Wagtail Page model. Returns None if unavailable."""
-        try:
-            from wagtail.models import Page  # type: ignore
-
-            return Page
-        except Exception:
-            return None
-
-    def _get_content_extraction_utils(self) -> Tuple[Optional[Callable], Optional[Callable], Optional[Callable]]:
-        """Lazy import content extraction utilities from wagtail_rag.content_extraction."""
-        try:
-            from wagtail_rag.content_extraction import (
-                extract_page_content,
-                get_page_url,
-                extract_streamfield_text,
-            )
-
-            return extract_page_content, get_page_url, extract_streamfield_text
-        except Exception:
-            return None, None, None
-
+    # --- Static helper methods ---
     @staticmethod
     def _strip_html(text: Optional[str]) -> str:
         """Strip HTML tags from a string for cleaner embeddings/search content."""
@@ -111,7 +89,76 @@ class EmbeddingSearcher:
             return target_str.endswith(query_str) or query_str in target_str[1:]
         return False
 
-    # --- Document conversion and retrieval methods ---
+    # --- Vector Search Methods (Primary Search) ---
+    def _get_vector_docs(self, query: str) -> Tuple[List[Document], Set[str], Set[Any]]:
+        """
+        Perform vector search using embeddings (primary search method).
+        
+        This is always executed first. It uses semantic similarity to find
+        documents that are conceptually similar to the query, even if they
+        don't contain exact keyword matches.
+        
+        Args:
+            query: Search query string
+            
+        Returns:
+            Tuple of:
+            - docs: List of Document objects from vector search
+            - seen_urls: Set of URLs found (for deduplication)
+            - seen_ids: Set of page IDs found (for deduplication)
+        """
+        docs: List[Document] = []
+        seen_urls: Set[str] = set()
+        seen_ids: Set[Any] = set()
+
+        # Try modern retriever API first (supports MultiQueryRetriever)
+        try:
+            logger.warning(f"  → Using retriever.invoke() (may use MultiQueryRetriever with LLM query expansion)")
+            docs = self.retriever.invoke(query)
+        except Exception:
+            # Fallback to direct vectorstore search
+            try:
+                logger.warning(f"  → Fallback: Using direct vectorstore.similarity_search()")
+                docs = self.vectorstore.similarity_search(query, k=self.k_value)
+            except Exception:
+                logger.warning(f"  → Error: Vector search failed, returning empty results")
+                docs = []
+
+        # Track URLs and IDs for deduplication (used when combining with Wagtail results)
+        for doc in docs:
+            meta = getattr(doc, "metadata", {}) or {}
+            url = meta.get("url", "")
+            doc_id = meta.get("id")
+            if url:
+                seen_urls.add(url)
+            if doc_id:
+                seen_ids.add(doc_id)
+
+        return docs, seen_urls, seen_ids
+
+    # --- Wagtail Search Methods (Secondary Search, Only if Hybrid Enabled) ---
+    def _get_wagtail_page_model(self):
+        """Lazy import of Wagtail Page model. Returns None if unavailable."""
+        try:
+            from wagtail.models import Page  # type: ignore
+
+            return Page
+        except Exception:
+            return None
+
+    def _get_content_extraction_utils(self) -> Tuple[Optional[Callable], Optional[Callable], Optional[Callable]]:
+        """Lazy import content extraction utilities from wagtail_rag.content_extraction."""
+        try:
+            from wagtail_rag.content_extraction import (
+                extract_page_content,
+                get_page_url,
+                extract_streamfield_text,
+            )
+
+            return extract_page_content, get_page_url, extract_streamfield_text
+        except Exception:
+            return None, None, None
+
     def _convert_wagtail_page_to_document(self, page: Any) -> Optional[Document]:
         """Convert a Wagtail Page object into a lightweight Document instance."""
         try:
@@ -164,55 +211,62 @@ class EmbeddingSearcher:
         except Exception:
             return None
 
-    def _get_vector_docs(self, query: str) -> Tuple[List[Document], Set[str], Set[Any]]:
+    def _normalize_query_for_wagtail(self, query: str) -> str:
         """
-        Perform vector search using embeddings (primary search method).
+        Normalize query for Wagtail search to improve matching.
         
-        This is always executed first. It uses semantic similarity to find
-        documents that are conceptually similar to the query, even if they
-        don't contain exact keyword matches.
+        Wagtail search works better with clean keywords. This method:
+        - Removes question marks and other punctuation
+        - Handles common question patterns
+        - Extracts key terms from natural language queries
         
         Args:
-            query: Search query string
+            query: Original search query
             
         Returns:
-            Tuple of:
-            - docs: List of Document objects from vector search
-            - seen_urls: Set of URLs found (for deduplication)
-            - seen_ids: Set of page IDs found (for deduplication)
+            Normalized query string for Wagtail search
         """
-        docs: List[Document] = []
-        seen_urls: Set[str] = set()
-        seen_ids: Set[Any] = set()
-
-        # Try modern retriever API first (supports MultiQueryRetriever)
-        try:
-            docs = self.retriever.invoke(query)
-        except Exception:
-            # Fallback to direct vectorstore search
-            try:
-                docs = self.vectorstore.similarity_search(query, k=self.k_value)
-            except Exception:
-                docs = []
-
-        # Track URLs and IDs for deduplication (used when combining with Wagtail results)
-        for doc in docs:
-            meta = getattr(doc, "metadata", {}) or {}
-            url = meta.get("url", "")
-            doc_id = meta.get("id")
-            if url:
-                seen_urls.add(url)
-            if doc_id:
-                seen_ids.add(doc_id)
-
-        return docs, seen_urls, seen_ids
+        import re
+        
+        # Remove question marks and common punctuation
+        normalized = query.strip('?').strip('!').strip('.')
+        
+        # Handle common question patterns
+        question_patterns = [
+            (r'^what\s+is\s+', ''),
+            (r'^what\s+are\s+', ''),
+            (r'^what\s+', ''),
+            (r'^where\s+is\s+', ''),
+            (r'^where\s+are\s+', ''),
+            (r'^where\s+', ''),
+            (r'^how\s+to\s+', ''),
+            (r'^how\s+do\s+', ''),
+            (r'^how\s+', ''),
+            (r'^some\s+thing\s+to\s+', ''),  # "some thing to eat?" -> "eat"
+            (r'^something\s+to\s+', ''),      # "something to eat?" -> "eat"
+            (r'^tell\s+me\s+about\s+', ''),
+            (r'^i\s+want\s+to\s+', ''),
+            (r'^i\s+need\s+', ''),
+        ]
+        
+        for pattern, replacement in question_patterns:
+            normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+        
+        # Clean up extra whitespace
+        normalized = ' '.join(normalized.split())
+        
+        # If query becomes too short or empty, use original (cleaned)
+        if len(normalized.strip()) < 2:
+            normalized = query.strip('?').strip('!').strip('.')
+        
+        return normalized.strip()
 
     def _get_wagtail_docs(self, query: str, seen_urls: Set[str], seen_ids: Set[Any]) -> List[Document]:
         """
         Perform Wagtail full-text search (secondary search method, only if hybrid search enabled).
         
         This method is only called when use_hybrid_search=True. It uses Wagtail's
-        built-in search engine to find pages with exact keyword matches.
+        built-in search engine to find pages with keyword matches.
         
         Args:
             query: Search query string
@@ -232,15 +286,41 @@ class EmbeddingSearcher:
             return []
 
         try:
-            # Use Wagtail's full-text search (PostgreSQL or Elasticsearch)
-            wagtail_results = Page.objects.live().search(query)[:10]
+            # Normalize query for better Wagtail search matching
+            normalized_query = self._normalize_query_for_wagtail(query)
+            if normalized_query != query:
+                logger.info(f"Normalized Wagtail query: '{query}' -> '{normalized_query}'")
             
+            # Use Wagtail's full-text search (PostgreSQL or Elasticsearch)
+            # Try normalized query first, fallback to original if needed
+            wagtail_results = Page.objects.live().search(normalized_query)[:10]
+            logger.info(f"Wagtail search returned {len(wagtail_results)} pages for query: '{query}'")
+            
+            if len(wagtail_results) == 0:
+                # Try original query if normalized query found nothing
+                if normalized_query != query:
+                    logger.info(f"Trying original query '{query}' after normalized query '{normalized_query}' found 0 results")
+                    wagtail_results = Page.objects.live().search(query)[:10]
+                
+                if len(wagtail_results) == 0:
+                    logger.warning(
+                        f"⚠️  Wagtail search found 0 pages for query: '{query}' (normalized: '{normalized_query}'). "
+                        f"This might mean:\n"
+                        f"  1. No pages contain this keyword in their searchable content\n"
+                        f"  2. Wagtail search index needs to be updated (run: python manage.py update_index)\n"
+                        f"  3. Pages might not be published/live\n"
+                        f"  4. Query might be too vague or use words not in your content"
+                    )
+            
+            skipped_count = 0
             for page in wagtail_results:
                 page_url = getattr(page, "url", "")
                 page_id = getattr(page, "id", None)
 
                 # Skip pages already found in vector search (deduplication)
                 if page_url in seen_urls or page_id in seen_ids:
+                    skipped_count += 1
+                    logger.debug(f"Skipping duplicate page: {page_url} (ID: {page_id})")
                     continue
 
                 # Convert Wagtail Page to Document format
@@ -250,9 +330,27 @@ class EmbeddingSearcher:
                     # Track to avoid duplicates in future iterations
                     seen_urls.add(page_url)
                     seen_ids.add(page_id)
-        except Exception:
-            # Swallow exceptions to keep search resilient in non-Wagtail environments
-            pass
+                    logger.debug(f"Added Wagtail page to results: {page_url} (ID: {page_id})")
+            
+            if skipped_count > 0:
+                logger.info(
+                    f"ℹ️  Deduplication: Skipped {skipped_count} out of {len(wagtail_results)} Wagtail pages "
+                    f"for query: '{query}' because they were already found in vector search. "
+                    f"This is expected behavior - preventing duplicate results."
+                )
+                
+            if skipped_count == len(wagtail_results) and len(wagtail_results) > 0:
+                logger.info(
+                    f"ℹ️  All {len(wagtail_results)} Wagtail search results were duplicates of vector search results "
+                    f"for query: '{query}'. This means:\n"
+                    f"  ✓ Wagtail search is working correctly\n"
+                    f"  ✓ Vector search already found all relevant pages\n"
+                    f"  ✓ No duplicate results will be returned (good!)\n"
+                    f"  ℹ️  This is normal when your content is well-indexed in the vector database"
+                )
+        except Exception as e:
+            # Log exception but keep search resilient in non-Wagtail environments
+            logger.warning(f"⚠️  Wagtail search failed for query '{query}': {e}", exc_info=True)
 
         return docs
 
@@ -342,16 +440,49 @@ class EmbeddingSearcher:
             List of Document objects ranked by relevance
         """
         # Step 1: Always perform vector search (primary search method)
+        logger.warning(f"🔍 STEP 1: Vector Search - Starting vector search for query: '{query}'")
         vector_docs, seen_urls, seen_ids = self._get_vector_docs(query)
+        logger.warning(f"✅ STEP 1: Vector Search - Found {len(vector_docs)} documents for query: '{query}'")
         
         # Step 2: Optionally add Wagtail search results (only if hybrid search is enabled)
         wagtail_docs = []
         if self.use_hybrid_search:
+            logger.warning(f"🔍 STEP 2: Hybrid Search (Wagtail) - Starting Wagtail search for query: '{query}'")
             wagtail_docs = self._get_wagtail_docs(query, seen_urls, seen_ids)
+            logger.warning(f"✅ STEP 2: Hybrid Search (Wagtail) - Found {len(wagtail_docs)} additional documents (after deduplication) for query: '{query}'")
+            
+            # Warn if Wagtail search didn't add any new results
+            if len(wagtail_docs) == 0 and len(vector_docs) > 0:
+                logger.info(
+                    f"ℹ️  Hybrid search enabled for query: '{query}'. "
+                    f"Vector search found {len(vector_docs)} documents. "
+                    f"Wagtail search found 0 additional unique documents (all were duplicates or no matches). "
+                    f"This is normal - it means your vector search is comprehensive and already found all relevant pages."
+                )
+            elif len(wagtail_docs) == 0 and len(vector_docs) == 0:
+                logger.warning(
+                    f"⚠️  Both vector and Wagtail search returned 0 results for query: '{query}'. "
+                    f"Consider:\n"
+                    f"  1. Checking if content is indexed (run: python manage.py build_rag_index)\n"
+                    f"  2. Updating Wagtail search index (run: python manage.py update_index)\n"
+                    f"  3. Verifying the query matches your content"
+                )
+        else:
+            logger.warning(f"⏭️  STEP 2: Hybrid Search (Wagtail) - Skipped (hybrid search disabled)")
         # If use_hybrid_search is False, wagtail_docs will be empty list
 
         # Step 3: Combine results (vector search + optional Wagtail search)
         all_docs = vector_docs + wagtail_docs
+        logger.warning(f"📊 STEP 2 Summary: Total documents after combining: {len(all_docs)} (vector: {len(vector_docs)}, wagtail: {len(wagtail_docs)})")
+        
+        # Info message if results are the same as vector-only (this is actually good - means comprehensive indexing)
+        if self.use_hybrid_search and len(wagtail_docs) == 0 and len(all_docs) == len(vector_docs) and len(vector_docs) > 0:
+            logger.info(
+                f"ℹ️  Hybrid search results for query: '{query}': "
+                f"Returning {len(all_docs)} documents from vector search. "
+                f"Wagtail search verified these results (no additional unique pages found). "
+                f"This indicates your vector database has comprehensive coverage of your content."
+            )
         
         # Step 4: Limit to top K documents
         docs = all_docs[: self.k_value]
@@ -363,6 +494,7 @@ class EmbeddingSearcher:
         if boost_title_matches and docs:
             docs = self._rerank_by_title_match(query, docs)
 
+        logger.warning(f"✅ Search Complete: Returning {len(docs)} documents for query: '{query}'")
         return docs
 
     def _deduplicate_results(self, raw_results: List[Tuple[Document, float]], k: int) -> List[Tuple[Document, float]]:

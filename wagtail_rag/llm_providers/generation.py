@@ -27,6 +27,13 @@ except Exception:
     LCEL_AVAILABLE = False
 
 try:
+    from langchain_core.messages import HumanMessage
+    HUMAN_MESSAGE_AVAILABLE = True
+except Exception:
+    HumanMessage = None
+    HUMAN_MESSAGE_AVAILABLE = False
+
+try:
     # Legacy LangChain interfaces
     from langchain.prompts import PromptTemplate
     from langchain.chains import RetrievalQA
@@ -147,48 +154,95 @@ Answer:""",
         """Generate an answer by formatting a prompt and calling the raw LLM callable.
 
         This is used as a fallback when no QA chain is available.
+        Handles both chat models (ChatOllama, ChatOpenAI, etc.) and regular LLMs.
         """
         prompt_text = self._format_simple_prompt(question, docs)
-        # Allow llm to be either a callable or a LangChain LLM object
-        try:
-            return self.llm(prompt_text)
-        except TypeError:
-            # Some LangChain LLM wrappers expect a dict or different signature; try a best-effort call
+        
+        # Check if this is a chat model (expects messages, not plain strings)
+        is_chat_model = (
+            hasattr(self.llm, '__class__') and 
+            'Chat' in self.llm.__class__.__name__
+        ) or (
+            hasattr(self.llm, 'invoke') and 
+            not hasattr(self.llm, 'generate')
+        )
+        
+        if is_chat_model:
+            # Chat models need messages, not plain strings
             try:
-                return self.llm.generate([prompt_text]).generations[0][0].text  # best-effort extraction
+                if HUMAN_MESSAGE_AVAILABLE and HumanMessage:
+                    message = HumanMessage(content=prompt_text)
+                    result = self.llm.invoke([message])
+                else:
+                    # Fallback: try with string or dict format
+                    result = self.llm.invoke(prompt_text)
+                
+                # Extract text from response (could be AIMessage or string)
+                if hasattr(result, 'content'):
+                    return result.content
+                elif isinstance(result, str):
+                    return result
+                else:
+                    return str(result)
             except Exception:
-                logger.exception("LLM call failed for simple prompt")
-                raise
+                # Fallback: try dict format or direct string
+                try:
+                    result = self.llm.invoke({"role": "user", "content": prompt_text})
+                    if hasattr(result, 'content'):
+                        return result.content
+                    return str(result)
+                except Exception:
+                    logger.exception("Chat model invocation failed")
+                    raise
+        else:
+            # Regular LLM - try different invocation methods
+            try:
+                # Try direct call (for callable LLMs)
+                return self.llm(prompt_text)
+            except TypeError:
+                # Try invoke method
+                try:
+                    result = self.llm.invoke(prompt_text)
+                    if isinstance(result, str):
+                        return result
+                    if hasattr(result, 'content'):
+                        return result.content
+                    return str(result)
+                except Exception:
+                    # Try generate method (legacy LangChain)
+                    try:
+                        return self.llm.generate([prompt_text]).generations[0][0].text
+                    except Exception:
+                        logger.exception("LLM call failed for simple prompt")
+                        raise
 
     def generate_answer(self, question: str, docs: Optional[List[Any]] = None) -> str:
         """Main entry point for generating an answer.
 
         Behavior:
-        - If a QA chain exists and no explicit docs passed, use the chain.
-        - If docs are passed and no chain exists, call the llm directly with formatted prompt.
-        - If both exist and docs are provided, prefer the qa_chain if it supports direct context injection (legacy chains accept query only).
+        - If docs are provided, use them directly (bypass chain's retriever) to ensure
+          we use the documents from hybrid search (vector + Wagtail).
+        - If no docs provided and a QA chain exists, use the chain (which will use its retriever).
+        - If no chain exists, docs are required.
         """
-        # Fallback mode: no chain
-        if self.qa_chain is None:
-            if not docs:
-                raise ValueError("docs required when qa_chain is None")
+        # If docs are provided, use them directly - don't let the chain re-retrieve
+        # This ensures we use the documents from our hybrid search (vector + Wagtail)
+        if docs:
+            logger.info(f"Using {len(docs)} pre-retrieved documents for LLM context (bypassing chain retriever)")
             return self.generate_answer_with_llm(question, docs)
 
-        # We have a chain. Prefer to invoke the chain.
+        # Fallback mode: no chain
+        if self.qa_chain is None:
+            raise ValueError("docs required when qa_chain is None")
+
+        # We have a chain but no docs - use the chain (it will use its retriever)
         if LCEL_AVAILABLE and hasattr(self.qa_chain, "invoke"):
             # LCEL-style chain handles retrieval/internal flow
             try:
-                if docs:
-                    out = self.qa_chain.invoke({"context": docs, "question": question})
-                else:
-                    out = self.qa_chain.invoke(question)
+                out = self.qa_chain.invoke(question)
             except Exception:
-                # Fallback to invoking with just the question
-                try:
-                    out = self.qa_chain.invoke(question)
-                except Exception:
-                    logger.exception("LCEL chain invocation failed")
-                    out = None
+                logger.exception("LCEL chain invocation failed")
+                raise
 
             # Normalize output to a string when possible
             if isinstance(out, str):
