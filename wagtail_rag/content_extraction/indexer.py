@@ -360,11 +360,11 @@ def build_rag_index(
                         "app": model._meta.app_label,
                     })
                 
-                # Delete old chunks if re-indexing a specific page
-                if page_id:
-                    store.delete_page(page.id)
+                # Always delete old chunks before re-indexing to prevent duplicates
+                # This ensures clean re-indexing whether running full index or single page
+                store.delete_page(page.id)
                 
-                # Upsert documents
+                # Upsert documents (will overwrite any remaining chunks with same IDs)
                 store.upsert(documents)
                 total_documents += len(documents)
                 
