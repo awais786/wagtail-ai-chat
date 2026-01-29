@@ -113,7 +113,15 @@ class RAGChatBot:
         self.retriever = self._create_retriever()
 
         # Initialize searcher and generator
-        use_hybrid_search = getattr(settings, 'WAGTAIL_RAG_USE_HYBRID_SEARCH', True) and _is_wagtail_available()
+        # Check if hybrid search (vector + Wagtail) is enabled
+        use_hybrid_search_setting = getattr(settings, 'WAGTAIL_RAG_USE_HYBRID_SEARCH', True)
+        use_hybrid_search = use_hybrid_search_setting and _is_wagtail_available()
+        
+        if use_hybrid_search_setting and not _is_wagtail_available():
+            logger.warning("WAGTAIL_RAG_USE_HYBRID_SEARCH is True but Wagtail is not available. Using vector-only search.")
+        elif not use_hybrid_search_setting:
+            logger.info("WAGTAIL_RAG_USE_HYBRID_SEARCH is False. Using vector-only search (Wagtail search disabled).")
+        
         self.embedding_searcher = EmbeddingSearcher(
             vectorstore=self.vectorstore,
             retriever=self.retriever,
@@ -125,12 +133,16 @@ class RAGChatBot:
 
     def _log_configuration(self, embedding_provider, embedding_model):
         """Log the chatbot configuration."""
+        use_hybrid = getattr(settings, 'WAGTAIL_RAG_USE_HYBRID_SEARCH', True)
+        search_mode = "Hybrid (vector + Wagtail)" if use_hybrid else "Vector-only (Wagtail disabled)"
+        
         logger.info(f"RAGChatBot initialized with:")
         logger.info(f"  - Collection: {self.collection_name}")
         logger.info(f"  - LLM Provider: {self.llm_provider}")
         logger.info(f"  - LLM Model: {self.model_name or 'default for provider'}")
         logger.info(f"  - Embedding Provider: {embedding_provider}")
         logger.info(f"  - Embedding Model: {embedding_model or 'default for provider'}")
+        logger.info(f"  - Search Mode: {search_mode}")
 
     def _create_vectorstore(self):
         """Create and return the ChromaDB vectorstore."""

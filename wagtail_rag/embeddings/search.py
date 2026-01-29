@@ -29,14 +29,35 @@ class EmbeddingSearcher:
     """
     Handles embedding-based similarity search for RAG chatbot.
 
-    Encapsulates:
-    - Vector similarity search via vectorstore/retriever
-    - Optional hybrid Wagtail full-text search
-    - Title-based boosting and conservative re-ranking
-    - Deduplication and HTML stripping
+    Search Strategy:
+    1. Vector Search (always performed):
+       - Uses semantic similarity via embeddings
+       - Finds conceptually similar content even without exact keyword matches
+       - Primary search method
+    
+    2. Wagtail Search (optional, only if use_hybrid_search=True):
+       - Uses Wagtail's full-text search engine
+       - Finds exact keyword matches in page titles/content
+       - Secondary search method that supplements vector search
+    
+    Additional Features:
+    - Title-based boosting for short queries
+    - Conservative re-ranking by title similarity
+    - Automatic deduplication between vector and Wagtail results
+    - HTML stripping for cleaner content
     """
 
     def __init__(self, vectorstore: Any, retriever: Any, k_value: int, use_hybrid_search: bool = True):
+        """
+        Initialize the embedding searcher.
+        
+        Args:
+            vectorstore: ChromaDB vectorstore instance
+            retriever: LangChain retriever instance
+            k_value: Number of documents to retrieve
+            use_hybrid_search: If True, combines vector search + Wagtail search.
+                             If False, uses only vector search.
+        """
         self.vectorstore = vectorstore
         self.retriever = retriever
         self.k_value = k_value
@@ -144,22 +165,37 @@ class EmbeddingSearcher:
             return None
 
     def _get_vector_docs(self, query: str) -> Tuple[List[Document], Set[str], Set[Any]]:
-        """Get documents from vector/retriever with fallbacks.
-
-        Returns: (docs, seen_urls, seen_ids)
+        """
+        Perform vector search using embeddings (primary search method).
+        
+        This is always executed first. It uses semantic similarity to find
+        documents that are conceptually similar to the query, even if they
+        don't contain exact keyword matches.
+        
+        Args:
+            query: Search query string
+            
+        Returns:
+            Tuple of:
+            - docs: List of Document objects from vector search
+            - seen_urls: Set of URLs found (for deduplication)
+            - seen_ids: Set of page IDs found (for deduplication)
         """
         docs: List[Document] = []
         seen_urls: Set[str] = set()
         seen_ids: Set[Any] = set()
 
+        # Try modern retriever API first (supports MultiQueryRetriever)
         try:
-            docs = self.retriever.invoke(query)  # new API path
+            docs = self.retriever.invoke(query)
         except Exception:
+            # Fallback to direct vectorstore search
             try:
                 docs = self.vectorstore.similarity_search(query, k=self.k_value)
             except Exception:
                 docs = []
 
+        # Track URLs and IDs for deduplication (used when combining with Wagtail results)
         for doc in docs:
             meta = getattr(doc, "metadata", {}) or {}
             url = meta.get("url", "")
@@ -172,7 +208,21 @@ class EmbeddingSearcher:
         return docs, seen_urls, seen_ids
 
     def _get_wagtail_docs(self, query: str, seen_urls: Set[str], seen_ids: Set[Any]) -> List[Document]:
-        """Query Wagtail full-text search and convert results to Documents."""
+        """
+        Perform Wagtail full-text search (secondary search method, only if hybrid search enabled).
+        
+        This method is only called when use_hybrid_search=True. It uses Wagtail's
+        built-in search engine to find pages with exact keyword matches.
+        
+        Args:
+            query: Search query string
+            seen_urls: URLs already found in vector search (for deduplication)
+            seen_ids: Page IDs already found in vector search (for deduplication)
+            
+        Returns:
+            List of Document objects from Wagtail search (excluding duplicates from vector search)
+        """
+        # Early return if hybrid search is disabled
         if not self.use_hybrid_search:
             return []
 
@@ -182,17 +232,22 @@ class EmbeddingSearcher:
             return []
 
         try:
+            # Use Wagtail's full-text search (PostgreSQL or Elasticsearch)
             wagtail_results = Page.objects.live().search(query)[:10]
+            
             for page in wagtail_results:
                 page_url = getattr(page, "url", "")
                 page_id = getattr(page, "id", None)
 
+                # Skip pages already found in vector search (deduplication)
                 if page_url in seen_urls or page_id in seen_ids:
                     continue
 
+                # Convert Wagtail Page to Document format
                 doc = self._convert_wagtail_page_to_document(page)
                 if doc:
                     docs.append(doc)
+                    # Track to avoid duplicates in future iterations
                     seen_urls.add(page_url)
                     seen_ids.add(page_id)
         except Exception:
@@ -271,15 +326,40 @@ class EmbeddingSearcher:
         return [doc for _, _, doc in scored_docs]
 
     def retrieve_with_embeddings(self, query: str, boost_title_matches: bool = True) -> List[Document]:
-        """Retrieve documents using embedding search combined with optional Wagtail search."""
+        """
+        Retrieve documents using embedding search, optionally combined with Wagtail search.
+        
+        Flow:
+        1. Always perform vector search (semantic similarity via embeddings)
+        2. If hybrid search is enabled, add Wagtail full-text search results
+        3. Combine, deduplicate, and rank results
+        
+        Args:
+            query: Search query string
+            boost_title_matches: Whether to boost documents with matching titles
+            
+        Returns:
+            List of Document objects ranked by relevance
+        """
+        # Step 1: Always perform vector search (primary search method)
         vector_docs, seen_urls, seen_ids = self._get_vector_docs(query)
-        wagtail_docs = self._get_wagtail_docs(query, seen_urls, seen_ids)
+        
+        # Step 2: Optionally add Wagtail search results (only if hybrid search is enabled)
+        wagtail_docs = []
+        if self.use_hybrid_search:
+            wagtail_docs = self._get_wagtail_docs(query, seen_urls, seen_ids)
+        # If use_hybrid_search is False, wagtail_docs will be empty list
 
+        # Step 3: Combine results (vector search + optional Wagtail search)
         all_docs = vector_docs + wagtail_docs
+        
+        # Step 4: Limit to top K documents
         docs = all_docs[: self.k_value]
 
+        # Step 5: Boost title matches for short queries (e.g., "Bread")
         docs = self._boost_title_matches_if_short_query(query, docs)
 
+        # Step 6: Re-rank by title similarity if enabled
         if boost_title_matches and docs:
             docs = self._rerank_by_title_match(query, docs)
 
