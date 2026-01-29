@@ -113,15 +113,15 @@ class EmbeddingSearcher:
 
         # Try modern retriever API first (supports MultiQueryRetriever)
         try:
-            logger.warning(f"  → Using retriever.invoke() (may use MultiQueryRetriever with LLM query expansion)")
+            logger.debug(f"Using retriever.invoke() (may use MultiQueryRetriever with LLM query expansion)")
             docs = self.retriever.invoke(query)
         except Exception:
             # Fallback to direct vectorstore search
             try:
-                logger.warning(f"  → Fallback: Using direct vectorstore.similarity_search()")
+                logger.debug(f"Fallback: Using direct vectorstore.similarity_search()")
                 docs = self.vectorstore.similarity_search(query, k=self.k_value)
             except Exception:
-                logger.warning(f"  → Error: Vector search failed, returning empty results")
+                logger.warning(f"Error: Vector search failed, returning empty results")
                 docs = []
 
         # Track URLs and IDs for deduplication (used when combining with Wagtail results)
@@ -217,8 +217,7 @@ class EmbeddingSearcher:
         
         Wagtail search works better with clean keywords. This method:
         - Removes question marks and other punctuation
-        - Handles common question patterns
-        - Extracts key terms from natural language queries
+        - Cleans up whitespace
         
         Args:
             query: Original search query
@@ -226,38 +225,11 @@ class EmbeddingSearcher:
         Returns:
             Normalized query string for Wagtail search
         """
-        import re
-        
         # Remove question marks and common punctuation
         normalized = query.strip('?').strip('!').strip('.')
         
-        # Handle common question patterns
-        question_patterns = [
-            (r'^what\s+is\s+', ''),
-            (r'^what\s+are\s+', ''),
-            (r'^what\s+', ''),
-            (r'^where\s+is\s+', ''),
-            (r'^where\s+are\s+', ''),
-            (r'^where\s+', ''),
-            (r'^how\s+to\s+', ''),
-            (r'^how\s+do\s+', ''),
-            (r'^how\s+', ''),
-            (r'^some\s+thing\s+to\s+', ''),  # "some thing to eat?" -> "eat"
-            (r'^something\s+to\s+', ''),      # "something to eat?" -> "eat"
-            (r'^tell\s+me\s+about\s+', ''),
-            (r'^i\s+want\s+to\s+', ''),
-            (r'^i\s+need\s+', ''),
-        ]
-        
-        for pattern, replacement in question_patterns:
-            normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
-        
         # Clean up extra whitespace
         normalized = ' '.join(normalized.split())
-        
-        # If query becomes too short or empty, use original (cleaned)
-        if len(normalized.strip()) < 2:
-            normalized = query.strip('?').strip('!').strip('.')
         
         return normalized.strip()
 
@@ -473,7 +445,7 @@ class EmbeddingSearcher:
 
         # Step 3: Combine results (vector search + optional Wagtail search)
         all_docs = vector_docs + wagtail_docs
-        logger.warning(f"STEP 2 Summary: Total documents after combining: {len(all_docs)} (vector: {len(vector_docs)}, wagtail: {len(wagtail_docs)})")
+        logger.info(f"Search Summary: Total documents after combining: {len(all_docs)} (vector: {len(vector_docs)}, wagtail: {len(wagtail_docs)})")
         
         # Info message if results are the same as vector-only (this is actually good - means comprehensive indexing)
         if self.use_hybrid_search and len(wagtail_docs) == 0 and len(all_docs) == len(vector_docs) and len(vector_docs) > 0:
@@ -494,7 +466,7 @@ class EmbeddingSearcher:
         if boost_title_matches and docs:
             docs = self._rerank_by_title_match(query, docs)
 
-        logger.warning(f"Search Complete: Returning {len(docs)} documents for query: '{query}'")
+        logger.info(f"Search Complete: Returning {len(docs)} documents for query: '{query}'")
         return docs
 
     def _deduplicate_results(self, raw_results: List[Tuple[Document, float]], k: int) -> List[Tuple[Document, float]]:

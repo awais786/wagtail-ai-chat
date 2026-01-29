@@ -226,18 +226,18 @@ class RAGChatBot:
         # Step 1: Retrieve documents using embedding search
         logger.warning(f"Starting RAG pipeline for question: '{question}'")
         docs = self.embedding_searcher.retrieve_with_embeddings(question, boost_title_matches=boost_title_matches)
-        logger.warning(f"Retrieved {len(docs)} documents for LLM context")
+        logger.info(f"Retrieved {len(docs)} documents for LLM context")
         
         # Step 2: Generate answer using LLM with retrieved context
         logger.warning(f"STEP 3: LLM Generation - Generating answer using {self.llm_provider}/{self.model_name or 'default'} for question: '{question}'")
-        logger.warning(f"Using {len(docs)} retrieved documents as context for LLM")
+        logger.debug(f"Using {len(docs)} retrieved documents as context for LLM")
         
         # Always use the retrieved documents - don't let the chain re-retrieve
         # This ensures we use the documents from our hybrid search (vector + Wagtail)
         answer = self.llm_generator.generate_answer(question, docs=docs)
         
         logger.warning(f"STEP 3: LLM Generation - Answer generated successfully")
-        logger.warning(f"LLM Result: {answer[:200] if isinstance(answer, str) else str(answer)[:200]}{'...' if (len(answer) if isinstance(answer, str) else len(str(answer))) > 200 else ''}")
+        logger.info(f"LLM Result: {answer[:200] if isinstance(answer, str) else str(answer)[:200]}{'...' if (len(answer) if isinstance(answer, str) else len(str(answer))) > 200 else ''}")
         return {'answer': answer, 'sources': self._format_sources(docs)}
 
     def update_filter(self, metadata_filter):
