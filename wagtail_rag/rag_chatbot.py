@@ -43,7 +43,7 @@ from .embeddings import get_embeddings
 # Import separated modules
 from .llm_providers import LLMGenerator
 from .embeddings import EmbeddingSearcher
-from .llm_providers.generation import USE_LCEL
+from .llm_providers.generation import LCEL_AVAILABLE as USE_LCEL
 
 
 def _is_wagtail_available():

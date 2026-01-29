@@ -6,8 +6,8 @@ This package contains:
 - search: Embedding-based similarity search logic (vector search, hybrid search, ranking)
 """
 
-from .providers import get_embeddings
+from .providers import get_embeddings, EmbeddingProviderFactory, BaseEmbeddingProvider
 from .search import EmbeddingSearcher
 
-__all__ = ['get_embeddings', 'EmbeddingSearcher']
+__all__ = ['get_embeddings', 'EmbeddingSearcher', 'EmbeddingProviderFactory', 'BaseEmbeddingProvider']
 

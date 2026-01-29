@@ -6,8 +6,8 @@ from various providers (OpenAI, Anthropic, Ollama, etc.), as well as response ge
 """
 
 # Export LLM-related functions and classes
-from .providers import get_llm
+from .providers import get_llm, LLMProviderFactory, BaseLLMProvider
 from .generation import LLMGenerator
 
-__all__ = ['get_llm', 'LLMGenerator']
+__all__ = ['get_llm', 'LLMGenerator', 'LLMProviderFactory', 'BaseLLMProvider']
 
