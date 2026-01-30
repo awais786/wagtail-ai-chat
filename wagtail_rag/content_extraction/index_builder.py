@@ -26,24 +26,15 @@ except ImportError:
 try:
     from wagtail_rag.embeddings import get_embeddings
 except ImportError:
-    # Fallback for older installations
+    # Fallback: use HuggingFace embeddings
     try:
-        from langchain_huggingface import HuggingFaceEmbeddings as _HuggingFaceEmbeddings
+        from langchain_huggingface import HuggingFaceEmbeddings
     except ImportError:
-        try:
-            from langchain_community.embeddings import HuggingFaceEmbeddings as _HuggingFaceEmbeddings
-        except ImportError:
-            raise ImportError(
-                "Could not import embeddings. Please install wagtail-rag[embeddings] or langchain-huggingface"
-            )
+        from langchain_community.embeddings import HuggingFaceEmbeddings
     
     def get_embeddings(provider=None, model_name=None, **kwargs):
-        """Fallback embedding function."""
-        if provider and provider.lower() not in ("huggingface", "hf", None):
-            raise ValueError(f"Only HuggingFace embeddings available in fallback mode. Requested: {provider}")
-        return _HuggingFaceEmbeddings(
-            model_name=model_name or "sentence-transformers/all-MiniLM-L6-v2",
-            **kwargs,
+        return HuggingFaceEmbeddings(
+            model_name=model_name or "sentence-transformers/all-MiniLM-L6-v2", **kwargs
         )
 
 
@@ -106,41 +97,33 @@ def get_live_pages(model: type, page_id: Optional[int] = None):
 
 
 def get_content_field_names(model: type) -> List[str]:
-    """
-    Return field names on the model that are content-bearing (StreamField, RichTextField, TextField, CharField).
-    Used when WAGTAIL_RAG_MODELS includes "app.Model:*" to treat all content fields as important.
-    """
+    """Get content-bearing field names (StreamField, RichTextField, TextField, CharField)."""
     from django.db import models
+    from wagtail.fields import RichTextField, StreamField
 
     skip = {
         "id", "pk", "path", "depth", "numchild", "url_path", "draft_title",
-        "live", "has_unpublished_changes", "search_description", "go_live_at", "expire_at",
-        "first_published_at", "last_published_at", "latest_revision_id", "content_type_id",
-        "translation_key", "locale_id",
+        "live", "has_unpublished_changes", "search_description", "go_live_at", 
+        "expire_at", "first_published_at", "last_published_at", "latest_revision_id", 
+        "content_type_id", "translation_key", "locale_id",
     }
+    
     content_names = []
     for f in model._meta.get_fields():
-        if not getattr(f, "name", None) or f.name in skip:
+        name = getattr(f, "name", None)
+        if not name or name in skip:
             continue
-        if getattr(f, "remote_field", None):
+        if getattr(f, "remote_field", None) or getattr(f, "many_to_many", False):
             continue
-        if getattr(f, "many_to_many", False) or getattr(f, "one_to_many", False):
-            continue
-        try:
-            if isinstance(f, (models.TextField, models.CharField)):
-                if isinstance(f, models.CharField) and getattr(f, "max_length", 0) and f.max_length < 100:
-                    continue
-                content_names.append(f.name)
-                continue
-        except Exception:
-            pass
-        try:
-            from wagtail.fields import RichTextField
-            from wagtail.blocks import StreamField
-            if isinstance(f, (RichTextField, StreamField)):
-                content_names.append(f.name)
-        except ImportError:
-            pass
+        
+        # Check if it's a content field
+        if isinstance(f, (RichTextField, StreamField)):
+            content_names.append(name)
+        elif isinstance(f, models.TextField):
+            content_names.append(name)
+        elif isinstance(f, models.CharField) and f.max_length >= 100:
+            content_names.append(name)
+    
     return content_names
 
 
@@ -236,129 +219,85 @@ class ChromaStore:
             except Exception:
                 pass
         elif self.backend == "faiss":
-            # Delete FAISS files and reinitialize
-            index_path = os.path.join(self.path, f"{self.collection}.faiss")
-            pkl_path = os.path.join(self.path, f"{self.collection}.pkl")
-            for file_path in [index_path, pkl_path]:
+            # Delete files
+            for ext in [".faiss", ".pkl"]:
+                file_path = os.path.join(self.path, f"{self.collection}{ext}")
                 if os.path.exists(file_path):
                     os.remove(file_path)
+            
             # Reinitialize
             import faiss
             from langchain_community.docstore.in_memory import InMemoryDocstore
-            test_embedding = self.db.embedding_function.embed_query("test")
-            dimension = len(test_embedding)
+            dimension = len(self.db.embedding_function.embed_query("test"))
             self.db.index = faiss.IndexFlatL2(dimension)
             self.db.docstore = InMemoryDocstore()
             self.db.index_to_docstore_id = {}
 
     def delete_page(self, page_id: int):
-        """
-        Delete all chunks for a specific page.
-        
-        Args:
-            page_id: The page ID to delete chunks for
-        """
+        """Delete all chunks for a specific page."""
         try:
             if self.backend == "chroma":
-                # ChromaDB: Get all documents with their IDs and metadata
                 data = self.db.get()
                 if not data or not data.get("ids"):
                     return
                 
-                ids = []
-                metadatas = data.get("metadatas", [])
-                for i, doc_id in enumerate(data.get("ids", [])):
-                    if i < len(metadatas):
-                        metadata = metadatas[i]
-                        if metadata and (metadata.get("page_id") == page_id or metadata.get("id") == page_id):
-                            ids.append(doc_id)
-                
+                ids = [
+                    doc_id for i, doc_id in enumerate(data.get("ids", []))
+                    if i < len(data.get("metadatas", [])) 
+                    and data["metadatas"][i].get("page_id") == page_id
+                ]
                 if ids:
                     self.db.delete(ids=ids)
             
             elif self.backend == "faiss":
-                # FAISS: Find all document IDs for this page by checking index_to_docstore_id
-                ids_to_delete = []
+                if not (hasattr(self.db, 'index_to_docstore_id') and hasattr(self.db, 'docstore')):
+                    return
                 
-                if hasattr(self.db, 'index_to_docstore_id') and hasattr(self.db, 'docstore'):
-                    # Iterate through all stored document IDs
-                    for doc_id in list(self.db.index_to_docstore_id.values()):
-                        try:
-                            stored_doc = self.db.docstore.search(doc_id)
-                            if isinstance(stored_doc, Document):
-                                stored_meta = stored_doc.metadata
-                                if stored_meta and (stored_meta.get("page_id") == page_id or stored_meta.get("id") == page_id):
-                                    ids_to_delete.append(doc_id)
-                        except (KeyError, AttributeError):
-                            # Document might have been deleted already, skip
-                            continue
+                ids_to_delete = []
+                for doc_id in list(self.db.index_to_docstore_id.values()):
+                    try:
+                        doc = self.db.docstore.search(doc_id)
+                        if isinstance(doc, Document) and doc.metadata.get("page_id") == page_id:
+                            ids_to_delete.append(doc_id)
+                    except (KeyError, AttributeError):
+                        continue
                 
                 if ids_to_delete:
                     self.db.delete(ids=ids_to_delete)
-                    # Save after deletion
                     self.db.save_local(self.path, index_name=self.collection)
         except Exception as e:
-            # Log error but don't fail - allow upsert to handle it
             import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Error deleting page {page_id}: {e}")
+            logging.getLogger(__name__).warning(f"Error deleting page {page_id}: {e}")
 
     def upsert(self, documents: List):
-        """
-        Upsert documents into the store with deterministic IDs.
-        
-        This method ensures that documents with the same IDs are replaced,
-        preventing duplicates when re-indexing.
-        
-        Args:
-            documents: List of Document objects to upsert
-        """
+        """Upsert documents with deterministic IDs to prevent duplicates."""
         if not documents:
             return
         
+        # Generate deterministic IDs: {page_id}_{section}_{chunk_index}
         ids = []
-        counters = {}
-
-        # Generate deterministic IDs based on page_id, section, and chunk index
         for doc in documents:
-            page_id = doc.metadata.get("page_id") or doc.metadata.get("id", "unknown")
+            page_id = doc.metadata.get("page_id", "unknown")
             section = doc.metadata.get("section", "body")
-            chunk_index = doc.metadata.get("chunk_index")
-            
-            # chunk_index should always be set (0 for title/intro, 0+ for body chunks)
-            # If not set, default to 0
-            if chunk_index is None:
-                chunk_index = 0
-            
-            # Generate deterministic ID: {page_id}_{section}_{chunk_index}
+            chunk_index = doc.metadata.get("chunk_index", 0)
             doc_id = f"{page_id}_{section}_{chunk_index}"
             ids.append(doc_id)
-            
-            # Also store the ID in metadata for reference
             doc.metadata["doc_id"] = doc_id
 
-        # Add documents with upsert behavior
+        # Add documents
         if self.backend == "chroma":
-            # ChromaDB handles upsert automatically when IDs match
             self.db.add_documents(documents, ids=ids)
         elif self.backend == "faiss":
-            # FAISS: delete existing IDs first (simulate upsert)
-            existing_ids = []
+            # Delete existing IDs first
             if hasattr(self.db, 'index_to_docstore_id'):
-                # Check which IDs already exist
-                existing_ids = [doc_id for doc_id in ids if doc_id in self.db.index_to_docstore_id.values()]
+                existing = [i for i in ids if i in self.db.index_to_docstore_id.values()]
+                if existing:
+                    try:
+                        self.db.delete(ids=existing)
+                    except Exception:
+                        pass
             
-            # Delete existing documents with these IDs
-            if existing_ids:
-                try:
-                    self.db.delete(ids=existing_ids)
-                except Exception:
-                    # If delete fails, continue - add_documents will handle duplicates
-                    pass
-            
-            # Add new documents (will overwrite if IDs match after delete)
             self.db.add_documents(documents, ids=ids)
-            # Save FAISS to disk
             self.db.save_local(self.path, index_name=self.collection)
 
 
@@ -404,181 +343,124 @@ def build_rag_index(
     stdout: WriteFn = None,
 ) -> None:
     """
-    High-level API to build the RAG index.
-    
-    This is the main entry point for building the RAG index. It orchestrates:
-    1. Model/page selection
-    2. Document extraction
-    3. Vector store operations
+    Build the RAG index from Wagtail pages.
     
     Args:
-        model_names: Optional list of model names to include (e.g., ['breads.BreadPage'])
-        exclude_models: Optional list of model names to exclude
-        page_id: Optional page ID to re-index a single page
-        reset_only: If True, only reset the collection without indexing
-        stdout: Optional output function for logging
+        model_names: Model names to include (e.g., ['breads.BreadPage'])
+        exclude_models: Model names to exclude
+        page_id: Specific page ID to re-index
+        reset_only: Only reset the collection without indexing
+        stdout: Output function for logging
     """
-    # Resolve configuration from settings
-    if model_names is None:
-        model_names = getattr(settings, "WAGTAIL_RAG_MODELS", None)
+    # Get configuration
+    model_names = model_names or getattr(settings, "WAGTAIL_RAG_MODELS", None)
+    exclude_models = exclude_models or getattr(
+        settings, "WAGTAIL_RAG_EXCLUDE_MODELS", ["wagtailcore.Page", "wagtailcore.Site"]
+    )
     
-    # Parse shorthand syntax "app.Model:*" (treat all content fields as important)
-    models_with_all_fields: set = set()
+    # Parse :* shorthand (use all content fields)
+    models_with_all_fields = set()
     if model_names:
-        model_names, auto_model_fields = _parse_model_fields_shorthand(model_names)
-        if auto_model_fields:
-            models_with_all_fields = {s.split(":", 1)[0] for s in auto_model_fields}
+        model_names, auto_fields = _parse_model_fields_shorthand(model_names)
+        if auto_fields:
+            models_with_all_fields = {s.split(":", 1)[0] for s in auto_fields}
     
-    # Get exclude models from settings if not provided
-    if exclude_models is None:
-        exclude_models = getattr(
-            settings,
-            "WAGTAIL_RAG_EXCLUDE_MODELS",
-            ["wagtailcore.Page", "wagtailcore.Site"],
-        )
-    
-    # Get embedding configuration
-    embedding_provider = getattr(
-        settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface"
-    )
-    embedding_model = getattr(settings, "WAGTAIL_RAG_EMBEDDING_MODEL", None)
-    
-    # Get vector store configuration
-    vector_store_backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss")
-    persist_directory = getattr(
-        settings,
-        "WAGTAIL_RAG_CHROMA_PATH",  # Path for vector store (works for both ChromaDB and FAISS)
-        os.path.join(settings.BASE_DIR, "chroma_db"),
-    )
-    collection_name = getattr(
-        settings,
-        "WAGTAIL_RAG_COLLECTION_NAME",
-        "wagtail_rag",
-    )
-    
-    # Initialize embeddings
+    # Initialize embeddings and vector store
     _write(stdout, "Initializing embeddings...")
     embeddings = get_embeddings(
-        provider=embedding_provider,
-        model_name=embedding_model,
+        provider=getattr(settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface"),
+        model_name=getattr(settings, "WAGTAIL_RAG_EMBEDDING_MODEL", None),
     )
     
-    # Initialize store (ChromaDB or FAISS based on settings)
-    _write(stdout, f"Using {vector_store_backend.upper()} vector store backend...")
-    store = ChromaStore(
-        path=persist_directory,
-        collection=collection_name,
-        embeddings=embeddings,
-        backend=vector_store_backend,
+    backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss")
+    collection = getattr(settings, "WAGTAIL_RAG_COLLECTION_NAME", "wagtail_rag")
+    path = getattr(
+        settings, "WAGTAIL_RAG_CHROMA_PATH", 
+        os.path.join(settings.BASE_DIR, "chroma_db")
     )
+    
+    _write(stdout, f"Using {backend.upper()} vector store...")
+    store = ChromaStore(path=path, collection=collection, embeddings=embeddings, backend=backend)
     
     # Handle reset-only mode
     if reset_only:
-        _write(stdout, "Resetting collection (reset-only mode)...")
+        _write(stdout, "Resetting collection...")
         store.reset()
-        _write(stdout, f'Collection "{collection_name}" cleared successfully')
-        _write(stdout, "Reset-only complete. No indexing performed.")
+        _write(stdout, f'Collection "{collection}" cleared')
         return
     
-    # Get page models
+    # Get page models to index
     models = get_page_models(include=model_names, exclude=exclude_models)
     if not models:
-        _write(stdout, "No page models found to index.")
+        _write(stdout, "No page models found")
         return
     
-    _write(stdout, f"Found {len(models)} page model(s) to index:")
-    for model in models:
-        _write(stdout, f"  - {model._meta.app_label}.{model.__name__}")
-    
-    if exclude_models:
-        _write(stdout, f"Excluding models: {', '.join(exclude_models)}")
-    
+    _write(stdout, f"Found {len(models)} models: {', '.join(f'{m._meta.app_label}.{m.__name__}' for m in models)}")
     if page_id:
-        _write(stdout, f"Re-indexing specific page ID: {page_id}")
+        _write(stdout, f"Re-indexing page ID: {page_id}")
     
-    _write(stdout, "Starting RAG index building...")
-    
-    total_documents = 0
+    _write(stdout, "Starting index build...")
+    total_docs = 0
+    use_new = getattr(settings, "WAGTAIL_RAG_USE_NEW_EXTRACTOR", True) and page_to_documents_new_extractor
     
     # Process each model
     for model in models:
         model_name = f"{model._meta.app_label}.{model.__name__}"
-        live_pages = get_live_pages(model, page_id)
+        pages = get_live_pages(model, page_id)
+        count = pages.count()
         
-        count = live_pages.count()
         if count == 0:
-            if not page_id:
-                _write(stdout, f"  No live pages found for {model_name}")
             continue
         
-        if not page_id:
-            _write(stdout, f"  Indexing {count} pages from {model_name}...")
-        else:
-            _write(stdout, f"  Re-indexing page ID {page_id} from {model_name}...")
+        _write(stdout, f"  Indexing {count} pages from {model_name}...")
         
-        # When model is in "app.Model:*" list, use all content fields for extraction
-        use_all_fields = model_name in models_with_all_fields
-        streamfield_field_names = get_content_field_names(model) if use_all_fields else None
-        if use_all_fields and stdout:
-            _write(stdout, f"  Using all content fields for {model_name}: {streamfield_field_names or []}")
-
-        # Process each page (use new extractor by default when available)
-        use_new_extractor = getattr(settings, "WAGTAIL_RAG_USE_NEW_EXTRACTOR", True) and page_to_documents_new_extractor is not None
-        for page in live_pages:
+        # Check if model uses :* (all fields)
+        field_names = None
+        if model_name in models_with_all_fields:
+            field_names = get_content_field_names(model)
+            _write(stdout, f"  Using fields: {field_names}")
+        
+        # Extract documents from each page
+        for page in pages:
             try:
-                # Extract documents: use new extractor first, fall back to chunked extractor
-                documents = None
-                if use_new_extractor:
-                    documents = page_to_documents_new_extractor(page, stdout=stdout)
-                if documents is None or not documents:
-                    documents = wagtail_page_to_documents(
-                        page,
+                # Try new extractor first, fallback to chunked
+                docs = None
+                if use_new:
+                    docs = page_to_documents_new_extractor(page, stdout=stdout)
+                if not docs:
+                    docs = wagtail_page_to_documents(
+                        page, 
                         chunk_size=getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 500),
                         chunk_overlap=getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 75),
                         stdout=stdout,
-                        streamfield_field_names=streamfield_field_names,
+                        streamfield_field_names=field_names,
                     )
-
-                if not documents:
+                
+                if not docs:
                     continue
                 
-                # Add model-level metadata to each document
-                for doc in documents:
+                # Add model metadata
+                for doc in docs:
                     doc.metadata.update({
                         "source": model_name,
                         "model": model.__name__,
                         "app": model._meta.app_label,
                     })
                 
-                # Always delete old chunks before re-indexing to prevent duplicates
-                # This ensures clean re-indexing whether running full index or single page
+                # Delete old, add new
                 store.delete_page(page.id)
+                store.upsert(docs)
+                total_docs += len(docs)
                 
-                # Upsert documents (will overwrite any remaining chunks with same IDs)
-                store.upsert(documents)
-                total_documents += len(documents)
-                
-                # Log page extraction summary
-                separator = "=" * 80
-                _write(stdout, separator)
-                _write(
-                    stdout,
-                    f'Page: {model.__name__} (ID: {page.id}) - "{page.title}" - {len(documents)} documents',
-                )
+                _write(stdout, "=" * 80)
+                _write(stdout, f'Page: {model.__name__} (ID: {page.id}) - "{page.title}" - {len(docs)} docs')
                 _write(stdout, "-" * 80)
                 
             except Exception as e:
-                page_id_str = str(getattr(page, 'id', 'unknown'))
-                _write(
-                    stdout,
-                    f"  Error extracting documents from {model_name} (ID: {page_id_str}): {e}",
-                )
-                import traceback
+                _write(stdout, f"  Error on page {getattr(page, 'id', '?')}: {e}")
                 if stdout:
-                    _write(stdout, f"  Traceback: {traceback.format_exc()}")
+                    import traceback
+                    _write(stdout, f"  {traceback.format_exc()}")
     
-    _write(
-        stdout,
-        f'Successfully indexed {total_documents} documents in {vector_store_backend.upper()} "{collection_name}"',
-    )
-    _write(stdout, f"Vector store saved to: {persist_directory}")
+    _write(stdout, f'Indexed {total_docs} documents in {backend.upper()} "{collection}"')
+    _write(stdout, f"Saved to: {path}")

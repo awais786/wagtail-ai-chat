@@ -21,60 +21,44 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        # Model configuration now comes entirely from settings
+        # Get configuration
         model_names = getattr(settings, 'WAGTAIL_RAG_MODELS', None)
-
-        # Read configuration that will be applied by the shared indexer
         chunk_size = getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 1000)
         chunk_overlap = getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 200)
-        collection_name = getattr(settings, 'WAGTAIL_RAG_COLLECTION_NAME', 'wagtail_rag')
-        reset_only = options['reset_only']
-        page_id = options['page_id']
+        collection = getattr(settings, 'WAGTAIL_RAG_COLLECTION_NAME', 'wagtail_rag')
 
-        # Display configuration being used (keep CLI UX unchanged)
+        # Display configuration
         self.stdout.write('=' * 60)
-        self.stdout.write(self.style.SUCCESS('Wagtail RAG Configuration:'))
+        self.stdout.write(self.style.SUCCESS('Wagtail RAG Configuration'))
         self.stdout.write('=' * 60)
 
         if model_names:
-            self.stdout.write(f'Models to index (from settings): {", ".join(model_names)}')
+            self.stdout.write(f'Models: {", ".join(model_names)}')
         else:
-            self.stdout.write('Models to index: ALL Page models (no WAGTAIL_RAG_MODELS set)')
+            self.stdout.write('Models: ALL Page models')
 
         self.stdout.write(f'Chunk size: {chunk_size}')
         self.stdout.write(f'Chunk overlap: {chunk_overlap}')
-        self.stdout.write(f'Collection name: {collection_name}')
+        self.stdout.write(f'Collection: {collection}')
 
-        embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
-        embedding_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None)
-        self.stdout.write(f'Embedding provider: {embedding_provider} (used for vector search)')
-        if embedding_model:
-            self.stdout.write(f'Embedding model: {embedding_model}')
-        else:
-            self.stdout.write(f'Embedding model: default for {embedding_provider}')
+        # Embedding config
+        emb_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
+        emb_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None)
+        self.stdout.write(f'Embeddings: {emb_provider}/{emb_model or "default"}')
 
+        # LLM config
         llm_provider = getattr(settings, 'WAGTAIL_RAG_LLM_PROVIDER', 'ollama')
         llm_model = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None)
-        self.stdout.write(f'LLM Provider: {llm_provider} (used when querying chatbot)')
-        if llm_model:
-            self.stdout.write(f'LLM Model: {llm_model}')
-        else:
-            provider_defaults = {
-                'ollama': 'mistral',
-                'openai': 'gpt-4',
-                'anthropic': 'claude-3-sonnet-20240229',
-            }
-            default = provider_defaults.get(llm_provider, 'see settings')
-            self.stdout.write(f'LLM Model: {default} (default for {llm_provider})')
+        self.stdout.write(f'LLM: {llm_provider}/{llm_model or "default"}')
 
         self.stdout.write('=' * 60)
         self.stdout.write('')
 
-        # Delegate the heavy lifting to the shared indexing helper
+        # Run indexing
         build_rag_index(
             model_names=model_names,
-            reset_only=reset_only,
-            page_id=page_id,
+            reset_only=options['reset_only'],
+            page_id=options['page_id'],
             stdout=self.stdout.write,
         )
 
