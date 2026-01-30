@@ -228,8 +228,14 @@ class ChromaStore:
         try:
             if self.backend == "chroma":
                 # ChromaDB: Get all documents with their IDs and metadata
-                data = self.db.get()
+                try:
+                    data = self.db.get()
+                except Exception as e:
+                    logger.error(f"Failed to retrieve documents from ChromaDB for page {page_id}: {e}")
+                    raise
+                    
                 if not data or not data.get("ids"):
+                    logger.debug(f"No documents found in ChromaDB for page {page_id}")
                     return
                 
                 ids = []
@@ -241,7 +247,14 @@ class ChromaStore:
                             ids.append(doc_id)
                 
                 if ids:
-                    self.db.delete(ids=ids)
+                    try:
+                        self.db.delete(ids=ids)
+                        logger.info(f"Deleted {len(ids)} chunks for page {page_id} from ChromaDB")
+                    except Exception as e:
+                        logger.error(f"Failed to delete {len(ids)} chunks for page {page_id} from ChromaDB: {e}")
+                        raise
+                else:
+                    logger.debug(f"No matching chunks found for page {page_id} in ChromaDB")
             
             elif self.backend == "faiss":
                 # FAISS: Find all document IDs for this page by checking index_to_docstore_id
@@ -257,18 +270,26 @@ class ChromaStore:
                                 if stored_meta and (stored_meta.get("page_id") == page_id or stored_meta.get("id") == page_id):
                                     ids_to_delete.append(doc_id)
                         except (KeyError, AttributeError):
-                            # Document might have been deleted already, skip
+                            # Document might have been deleted already or doesn't exist, skip
+                            logger.debug(f"Document {doc_id} not found in FAISS docstore (may be already deleted)")
                             continue
+                else:
+                    logger.warning("FAISS vector store missing index_to_docstore_id or docstore attributes")
                 
                 if ids_to_delete:
-                    self.db.delete(ids=ids_to_delete)
-                    # Save after deletion
-                    self.db.save_local(self.path, index_name=self.collection)
+                    try:
+                        self.db.delete(ids=ids_to_delete)
+                        # Save after deletion
+                        self.db.save_local(self.path, index_name=self.collection)
+                        logger.info(f"Deleted {len(ids_to_delete)} chunks for page {page_id} from FAISS")
+                    except Exception as e:
+                        logger.error(f"Failed to delete {len(ids_to_delete)} chunks for page {page_id} from FAISS: {e}")
+                        raise
+                else:
+                    logger.debug(f"No matching chunks found for page {page_id} in FAISS")
         except Exception as e:
-            # Log error but don't fail - allow upsert to handle it
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Error deleting page {page_id}: {e}")
+            # Catch-all for unexpected errors - log and allow upsert to handle it
+            logger.warning(f"Unexpected error deleting page {page_id} (will continue with upsert): {e}", exc_info=True)
 
     def upsert(self, documents: List):
         """
