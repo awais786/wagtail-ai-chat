@@ -1,38 +1,23 @@
-"""
-Content Extraction and Indexing modules for Wagtail RAG.
+"""Content extraction and RAG index building for Wagtail."""
 
-This package contains:
-- content_extraction: Utility functions for extracting text from Wagtail pages
-- indexing: Core indexing logic for building the RAG index
-"""
-
-# Export content extraction utility functions
 from .content_extraction import (
-    extract_page_content,
-    get_page_url,
-    extract_streamfield_text,
     clean_html,
+    extract_page_content,
+    extract_streamfield_text,
+    get_page_url,
 )
-
-# Export document extraction (moved to extractors.py)
 from .extractors import wagtail_page_to_documents
-
-# Export indexing function
-from .indexer import build_rag_index
-
-# Export components from indexer
-from .indexer import get_page_models, get_live_pages, ChromaStore
+from .indexer import ChromaStore, build_rag_index, get_live_pages, get_page_models
 
 __all__ = [
-    'extract_page_content',
-    'get_page_url',
-    'extract_streamfield_text',
-    'clean_html',
-    'wagtail_page_to_documents',
-    'build_rag_index',
-    # New modular components
-    'get_page_models',
-    'get_live_pages',
-    'ChromaStore',  # Works with both ChromaDB and FAISS
+    "build_rag_index",
+    "ChromaStore",
+    "clean_html",
+    "extract_page_content",
+    "extract_streamfield_text",
+    "get_live_pages",
+    "get_page_models",
+    "get_page_url",
+    "wagtail_page_to_documents",
 ]
 
