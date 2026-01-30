@@ -146,70 +146,51 @@ class EmbeddingSearcher:
         except Exception:
             return None
 
-    def _get_content_extraction_utils(self) -> Tuple[Optional[Callable], Optional[Callable], Optional[Callable]]:
-        """Lazy import content extraction utilities from wagtail_rag.content_extraction."""
+    def _get_page_to_documents_function(self) -> Optional[Callable]:
+        """Lazy import page_to_documents function from wagtail_rag.content_extraction."""
         try:
-            from wagtail_rag.content_extraction import (
-                extract_all_page_content_as_text,
-                get_page_url,
-                extract_text_from_streamfield,
-            )
-
-            return extract_all_page_content_as_text, get_page_url, extract_text_from_streamfield
-        except Exception:
-            return None, None, None
-
-    def _convert_wagtail_page_to_document(self, page: Any) -> Optional[Document]:
-        """Convert a Wagtail Page object into a lightweight Document instance."""
-        try:
-            extract_all_page_content_as_text, get_page_url_util, extract_text_from_streamfield = self._get_content_extraction_utils()
-
-            page_url = getattr(page, "url", "")
-            if get_page_url_util:
-                page_url = get_page_url_util(page) or page_url
-
-            # Extract page content using extraction utilities when available
-            page_text = None
-            if extract_all_page_content_as_text:
-                page_text = extract_all_page_content_as_text(page)
-            else:
-                parts: List[str] = []
-                title = getattr(page, "title", "")
-                if title:
-                    parts.append(f"Title: {title}")
-
-                search_description = getattr(page, "search_description", "")
-                if search_description:
-                    parts.append(search_description)
-
-                body = getattr(page, "body", None)
-                if body:
-                    if extract_text_from_streamfield:
-                        streamfield_text = extract_text_from_streamfield(body)
-                        if streamfield_text:
-                            parts.append(streamfield_text[:500])
-                    else:
-                        parts.append(str(body)[:500])
-
-                page_text = "\n\n".join(parts) if parts else None
-
-            if not page_text or not str(page_text).strip():
-                return None
-
-            return Document(
-                page_content=page_text,
-                metadata={
-                    "title": getattr(page, "title", ""),
-                    "url": page_url,
-                    "id": getattr(page, "id", None),
-                    "source": f"{getattr(page, '_meta', None).app_label if getattr(page, '_meta', None) else ''}.{page.__class__.__name__}",
-                    "model": page.__class__.__name__,
-                    "app": getattr(getattr(page, '_meta', None), 'app_label', ''),
-                    "from_wagtail_search": True,
-                },
-            )
+            from wagtail_rag.content_extraction import wagtail_page_to_documents
+            return wagtail_page_to_documents
         except Exception:
             return None
+
+    def _convert_wagtail_page_to_documents(self, page: Any) -> List[Document]:
+        """
+        Convert a Wagtail Page object into Document objects using the same logic as indexing.
+        
+        This ensures consistency between indexed documents and search-time documents.
+        Uses wagtail_page_to_documents() which creates chunked documents (title, intro, body chunks).
+        """
+        try:
+            wagtail_page_to_documents_func = self._get_page_to_documents_function()
+            
+            if wagtail_page_to_documents_func:
+                # Use the same document conversion logic as indexing
+                # This creates multiple documents (title, intro, body chunks) with proper metadata
+                documents = wagtail_page_to_documents_func(page)
+                
+                # Mark these documents as coming from Wagtail search
+                for doc in documents:
+                    doc.metadata["from_wagtail_search"] = True
+                
+                return documents
+            else:
+                # Fallback: create a simple document if page_to_documents is not available
+                page_url = getattr(page, "url", "") or getattr(page, "url_path", "")
+                return [
+                    Document(
+                        page_content=f"Title: {getattr(page, 'title', '')}",
+                        metadata={
+                            "title": getattr(page, "title", ""),
+                            "url": page_url,
+                            "id": getattr(page, "id", None),
+                            "model": page.__class__.__name__,
+                            "from_wagtail_search": True,
+                        },
+                    )
+                ]
+        except Exception:
+            return []
 
     def _normalize_query_for_wagtail(self, query: str) -> str:
         """
@@ -295,14 +276,14 @@ class EmbeddingSearcher:
                     logger.debug(f"Skipping duplicate page: {page_url} (ID: {page_id})")
                     continue
 
-                # Convert Wagtail Page to Document format
-                doc = self._convert_wagtail_page_to_document(page)
-                if doc:
-                    docs.append(doc)
+                # Convert Wagtail Page to Document objects (same structure as indexed documents)
+                page_docs = self._convert_wagtail_page_to_documents(page)
+                if page_docs:
+                    docs.extend(page_docs)
                     # Track to avoid duplicates in future iterations
                     seen_urls.add(page_url)
                     seen_ids.add(page_id)
-                    logger.debug(f"Added Wagtail page to results: {page_url} (ID: {page_id})")
+                    logger.debug(f"Added {len(page_docs)} document(s) from Wagtail page: {page_url} (ID: {page_id})")
             
             if skipped_count > 0:
                 logger.info(

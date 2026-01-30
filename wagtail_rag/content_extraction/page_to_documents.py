@@ -6,19 +6,94 @@ with intelligent chunking and metadata. It creates separate documents for title/
 and chunks body content with title context for better semantic separation and retrieval.
 """
 
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, TYPE_CHECKING
+import html
+import re
 from django.conf import settings
-from wagtail.models import Page
+
+if TYPE_CHECKING:
+    from wagtail.models import Page  # type: ignore
+else:
+    try:
+        from wagtail.models import Page  # type: ignore
+    except ImportError:
+        Page = None  # type: ignore
 
 try:
     from langchain_core.documents import Document
 except ImportError:
     from langchain.schema import Document
 
-from wagtail_rag.content_extraction.text_extractors import (
-    extract_text_from_streamfield,
-    get_page_url,
-)
+
+def get_page_url(page: Page) -> str:
+    """
+    Get page URL safely, handling cases where it might not be available.
+    
+    Args:
+        page: Wagtail Page instance
+        
+    Returns:
+        Page URL or empty string if not available
+    """
+    try:
+        return page.get_full_url() or page.url_path or ""
+    except (AttributeError, RuntimeError, Exception):
+        return ""
+
+
+def _extract_all_strings_from_dict_recursively(data):
+    """
+    Recursively extract all string values from a nested dictionary.
+    
+    Traverses the dictionary structure and collects all string values,
+    handling nested dictionaries by recursively processing them.
+    
+    Args:
+        data: Dictionary (may contain nested dictionaries)
+        
+    Returns:
+        List of all string values found in the dictionary structure
+    """
+    strings = []
+    for value in data.values():
+        if isinstance(value, str):
+            strings.append(value)
+        elif isinstance(value, dict):
+            strings.extend(_extract_all_strings_from_dict_recursively(value))
+    return strings
+
+
+def extract_text_from_streamfield(streamfield) -> str:
+    """
+    Extract all text content from a Wagtail StreamField block.
+    
+    Processes each block in the StreamField:
+    - String blocks: added directly
+    - Blocks with 'value' attribute: extracts string values or recursively processes dict values
+    - Dict blocks: recursively extracts all string values from nested dictionaries
+    
+    Args:
+        streamfield: Wagtail StreamField instance or iterable of blocks
+        
+    Returns:
+        Single string containing all extracted text, space-separated
+    """
+    if not streamfield:
+        return ""
+
+    text_parts = []
+    for block in streamfield:
+        if hasattr(block, "value"):
+            value = block.value
+            if isinstance(value, str):
+                text_parts.append(value)
+            elif isinstance(value, dict):
+                # Extract text from dict values recursively
+                text_parts.extend(_extract_all_strings_from_dict_recursively(value))
+        elif isinstance(block, str):
+            text_parts.append(block)
+
+    return " ".join(text_parts)
 
 
 def _chunk_streamfield(page: Page, base_metadata: dict, chunk_size: int, chunk_overlap: int, stdout: Optional[Callable[[str], None]] = None) -> List[Document]:

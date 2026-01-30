@@ -41,43 +41,6 @@
             font-weight: 600;
         }
 
-        .tabs {
-            display: flex;
-            background: #f8f9fa;
-            border-bottom: 2px solid #e9ecef;
-        }
-
-        .tab {
-            flex: 1;
-            padding: 12px 20px;
-            background: transparent;
-            border: none;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            color: #6c757d;
-            transition: all 0.3s;
-            position: relative;
-        }
-
-        .tab:hover {
-            background: #e9ecef;
-        }
-
-        .tab.active {
-            color: #667eea;
-            background: white;
-        }
-
-        .tab.active::after {
-            content: '';
-            position: absolute;
-            bottom: -2px;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: #667eea;
-        }
 
         .chatbox-messages {
             flex: 1;
@@ -145,30 +108,6 @@
             text-decoration: underline;
         }
 
-        .search-result {
-            background: #f8f9fa;
-            border-left: 3px solid #667eea;
-            padding: 12px;
-            margin-bottom: 12px;
-            border-radius: 4px;
-        }
-
-        .search-result-title {
-            font-weight: 600;
-            color: #212529;
-            margin-bottom: 4px;
-        }
-
-        .search-result-content {
-            color: #6c757d;
-            font-size: 14px;
-            margin-bottom: 4px;
-        }
-
-        .search-result-score {
-            font-size: 12px;
-            color: #667eea;
-        }
 
         .chatbox-input-container {
             padding: 16px;
@@ -248,16 +187,11 @@
         <div class="chatbox-header">
             <h2>Ask Me Anything</h2>
         </div>
-        
-        <div class="tabs">
-            <button class="tab active" data-mode="chat">💬 Chat</button>
-            <button class="tab" data-mode="search">🔍 Search</button>
-        </div>
 
         <div class="chatbox-messages" id="messages">
             <div class="empty-state">
                 <div class="empty-state-icon">💭</div>
-                <p>Start a conversation or search for content!</p>
+                <p>Start a conversation!</p>
             </div>
         </div>
 
@@ -267,7 +201,7 @@
                     type="text" 
                     class="chatbox-input" 
                     id="userInput" 
-                    placeholder="Type your question or search query..."
+                    placeholder="Type your question..."
                     autocomplete="off"
                 >
                 <button class="send-button" id="sendButton">Send</button>
@@ -278,25 +212,10 @@
     <script>
         const API_BASE = '/api/rag';
         const CHAT_API = `${API_BASE}/chat/`;
-        const SEARCH_API = `${API_BASE}/search/`;
 
-        let currentMode = 'chat';
         const messagesContainer = document.getElementById('messages');
         const userInput = document.getElementById('userInput');
         const sendButton = document.getElementById('sendButton');
-        const tabs = document.querySelectorAll('.tab');
-
-        // Tab switching
-        tabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                tabs.forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                currentMode = tab.dataset.mode;
-                userInput.placeholder = currentMode === 'chat' 
-                    ? 'Type your question...' 
-                    : 'Type your search query...';
-            });
-        });
 
         // Send message
         function sendMessage() {
@@ -315,12 +234,8 @@
             sendButton.disabled = true;
             sendButton.innerHTML = '<div class="loading"></div>';
 
-            // Call appropriate API
-            if (currentMode === 'chat') {
-                callChatAPI(query);
-            } else {
-                callSearchAPI(query);
-            }
+            // Call chat API
+            callChatAPI(query);
         }
 
         // Add message to UI
@@ -352,39 +267,6 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        // Add search results to UI
-        function addSearchResults(query, results) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = 'message bot';
-
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'message-content';
-            contentDiv.innerHTML = `<strong>Found ${results.length} results for "${query}":</strong>`;
-            messageDiv.appendChild(contentDiv);
-
-            results.forEach(result => {
-                const resultDiv = document.createElement('div');
-                resultDiv.className = 'search-result';
-                
-                const title = result.metadata?.title || 'Untitled';
-                const url = result.metadata?.url || '#';
-                const content = result.content.substring(0, 200) + (result.content.length > 200 ? '...' : '');
-                const score = (result.score * 100).toFixed(1);
-
-                resultDiv.innerHTML = `
-                    <div class="search-result-title">
-                        <a href="${url}" target="_blank">${title}</a>
-                    </div>
-                    <div class="search-result-content">${content}</div>
-                    <div class="search-result-score">Relevance: ${score}%</div>
-                `;
-                messageDiv.appendChild(resultDiv);
-            });
-
-            messagesContainer.appendChild(messageDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
-
         // Call Chat API
         async function callChatAPI(question) {
             try {
@@ -403,39 +285,6 @@
                 }
 
                 addMessage(data.answer, 'bot', { sources: data.sources });
-            } catch (error) {
-                addMessage(`Error: ${error.message}`, 'bot');
-                const errorDiv = messagesContainer.querySelector('.message.bot:last-child .message-content');
-                if (errorDiv) errorDiv.classList.add('error');
-            } finally {
-                sendButton.disabled = false;
-                sendButton.textContent = 'Send';
-                userInput.focus();
-            }
-        }
-
-        // Call Search API
-        async function callSearchAPI(query) {
-            try {
-                const response = await fetch(SEARCH_API, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ query, k: 5 })
-                });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to search');
-                }
-
-                if (data.results && data.results.length > 0) {
-                    addSearchResults(query, data.results);
-                } else {
-                    addMessage('No results found.', 'bot');
-                }
             } catch (error) {
                 addMessage(`Error: ${error.message}`, 'bot');
                 const errorDiv = messagesContainer.querySelector('.message.bot:last-child .message-content');

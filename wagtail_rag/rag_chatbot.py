@@ -290,35 +290,6 @@ class RAGChatBot:
             search_kwargs["filter"] = self.metadata_filter
         self.retriever = self.vectorstore.as_retriever(search_kwargs=search_kwargs)
     
-    def search_with_embeddings(self, query, k=None, metadata_filter=None):
-        """
-        Search for similar content using embedding search (without generating an LLM response).
-        
-        This method performs embedding-based similarity search to find relevant documents
-        but does NOT call the LLM to generate an answer.
-        
-        Args:
-            query: Search query string
-            k: Number of results to return (default: from settings or 10)
-            metadata_filter: Optional filter dict (e.g., {'model': 'BreadPage'})
-            
-        Returns:
-            List[dict] where each item is:
-              {
-                  "content": plain-text snippet (HTML stripped),
-                  "metadata": original metadata dict stored with the chunk,
-                  "score": similarity score from vector store
-              }
-        """
-        return self.embedding_searcher.search_with_embeddings(query, k=k, metadata_filter=metadata_filter)
-    
-    def search_similar(self, query, k=None, metadata_filter=None):
-        """
-        Deprecated: Use search_with_embeddings() instead.
-        
-        This method is kept for backward compatibility.
-        """
-        return self.search_with_embeddings(query, k=k, metadata_filter=metadata_filter)
 
 
 def get_chatbot(collection_name=None, model_name=None, metadata_filter=None, llm_provider=None, llm_kwargs=None):
