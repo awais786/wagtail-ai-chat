@@ -352,7 +352,11 @@ def build_rag_index(
         reset_only: Only reset the collection without indexing
         stdout: Output function for logging
     """
-    # Get configuration
+    # Step 1: Configuration
+    _write(stdout, "\n" + "="*80)
+    _write(stdout, "STEP 1: Loading Configuration")
+    _write(stdout, "="*80)
+    
     model_names = model_names or getattr(settings, "WAGTAIL_RAG_MODELS", None)
     exclude_models = exclude_models or getattr(
         settings, "WAGTAIL_RAG_EXCLUDE_MODELS", ["wagtailcore.Page", "wagtailcore.Site"]
@@ -365,13 +369,6 @@ def build_rag_index(
         if auto_fields:
             models_with_all_fields = {s.split(":", 1)[0] for s in auto_fields}
     
-    # Initialize embeddings and vector store
-    _write(stdout, "Initializing embeddings...")
-    embeddings = get_embeddings(
-        provider=getattr(settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface"),
-        model_name=getattr(settings, "WAGTAIL_RAG_EMBEDDING_MODEL", None),
-    )
-    
     backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss")
     collection = getattr(settings, "WAGTAIL_RAG_COLLECTION_NAME", "wagtail_rag")
     path = getattr(
@@ -379,32 +376,53 @@ def build_rag_index(
         os.path.join(settings.BASE_DIR, "chroma_db")
     )
     
-    _write(stdout, f"Using {backend.upper()} vector store...")
+    _write(stdout, f"✓ Vector store: {backend.upper()}")
+    _write(stdout, f"✓ Collection: {collection}")
+    _write(stdout, f"✓ Storage path: {path}")
+    
+    # Initialize embeddings
+    _write(stdout, "\nInitializing embeddings...")
+    embeddings = get_embeddings(
+        provider=getattr(settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface"),
+        model_name=getattr(settings, "WAGTAIL_RAG_EMBEDDING_MODEL", None),
+    )
+    _write(stdout, "✓ Embeddings loaded")
+    
+    # Initialize vector store
+    _write(stdout, "Initializing vector store...")
     store = ChromaStore(path=path, collection=collection, embeddings=embeddings, backend=backend)
+    _write(stdout, "✓ Vector store ready")
     
     # Handle reset-only mode
     if reset_only:
-        _write(stdout, "Resetting collection...")
+        _write(stdout, "\nResetting collection...")
         store.reset()
-        _write(stdout, f'Collection "{collection}" cleared')
+        _write(stdout, f'✓ Collection "{collection}" cleared')
         return
+    
+    # Step 2: Extract Documents
+    _write(stdout, "\n" + "="*80)
+    _write(stdout, "STEP 2: Extracting Documents from Pages")
+    _write(stdout, "="*80)
     
     # Get page models to index
     models = get_page_models(include=model_names, exclude=exclude_models)
     if not models:
-        _write(stdout, "No page models found")
+        _write(stdout, "✗ No page models found")
         return
     
-    _write(stdout, f"Found {len(models)} models: {', '.join(f'{m._meta.app_label}.{m.__name__}' for m in models)}")
+    _write(stdout, f"✓ Found {len(models)} model(s): {', '.join(f'{m._meta.app_label}.{m.__name__}' for m in models)}")
     if page_id:
-        _write(stdout, f"Re-indexing page ID: {page_id}")
+        _write(stdout, f"→ Re-indexing specific page ID: {page_id}")
     
-    _write(stdout, "Starting index build...")
     total_docs = 0
+    total_pages = 0
     use_new = getattr(settings, "WAGTAIL_RAG_USE_NEW_EXTRACTOR", True) and page_to_documents_new_extractor
+    _write(stdout, f"→ Using {'smart' if use_new else 'chunked'} extractor")
     
     # Process each model
-    for model in models:
+    _write(stdout, "")
+    for model_idx, model in enumerate(models, 1):
         model_name = f"{model._meta.app_label}.{model.__name__}"
         pages = get_live_pages(model, page_id)
         count = pages.count()
@@ -412,32 +430,38 @@ def build_rag_index(
         if count == 0:
             continue
         
-        _write(stdout, f"  Indexing {count} pages from {model_name}...")
+        _write(stdout, f"\n[{model_idx}/{len(models)}] Processing {model_name}:")
+        _write(stdout, f"  → Found {count} live page(s)")
         
         # Check if model uses :* (all fields)
         field_names = None
         if model_name in models_with_all_fields:
             field_names = get_content_field_names(model)
-            _write(stdout, f"  Using fields: {field_names}")
+            _write(stdout, f"  → Extracting fields: {', '.join(field_names)}")
         
         # Extract documents from each page
-        for page in pages:
+        for page_idx, page in enumerate(pages, 1):
             try:
+                _write(stdout, f"\n  [{page_idx}/{count}] Extracting: {page.title} (ID: {page.id})")
+                
                 # Try new extractor first, fallback to chunked
                 docs = None
                 if use_new:
-                    docs = page_to_documents_new_extractor(page, stdout=stdout)
+                    docs = page_to_documents_new_extractor(page, stdout=None)
                 if not docs:
                     docs = wagtail_page_to_documents(
                         page, 
                         chunk_size=getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 500),
                         chunk_overlap=getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 75),
-                        stdout=stdout,
+                        stdout=None,
                         streamfield_field_names=field_names,
                     )
                 
                 if not docs:
+                    _write(stdout, "    ⚠ No documents extracted (empty page)")
                     continue
+                
+                _write(stdout, f"    ✓ Extracted {len(docs)} document(s)")
                 
                 # Add model metadata
                 for doc in docs:
@@ -447,20 +471,27 @@ def build_rag_index(
                         "app": model._meta.app_label,
                     })
                 
-                # Delete old, add new
+                # Save to vector store
+                _write(stdout, f"    → Saving to vector store...")
                 store.delete_page(page.id)
                 store.upsert(docs)
-                total_docs += len(docs)
+                _write(stdout, f"    ✓ Saved {len(docs)} document(s)")
                 
-                _write(stdout, "=" * 80)
-                _write(stdout, f'Page: {model.__name__} (ID: {page.id}) - "{page.title}" - {len(docs)} docs')
-                _write(stdout, "-" * 80)
+                total_docs += len(docs)
+                total_pages += 1
                 
             except Exception as e:
-                _write(stdout, f"  Error on page {getattr(page, 'id', '?')}: {e}")
+                _write(stdout, f"    ✗ Error: {e}")
                 if stdout:
                     import traceback
-                    _write(stdout, f"  {traceback.format_exc()}")
+                    _write(stdout, f"    {traceback.format_exc()}")
     
-    _write(stdout, f'Indexed {total_docs} documents in {backend.upper()} "{collection}"')
-    _write(stdout, f"Saved to: {path}")
+    # Step 3: Summary
+    _write(stdout, "\n" + "="*80)
+    _write(stdout, "STEP 3: Indexing Complete")
+    _write(stdout, "="*80)
+    _write(stdout, f"✓ Processed {total_pages} page(s)")
+    _write(stdout, f"✓ Created {total_docs} document(s)")
+    _write(stdout, f"✓ Saved to {backend.upper()} collection: {collection}")
+    _write(stdout, f"✓ Storage location: {path}")
+    _write(stdout, "="*80 + "\n")
