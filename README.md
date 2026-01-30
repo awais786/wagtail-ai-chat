@@ -80,7 +80,7 @@ pip install wagtail-rag[all]
 
 **Note:** Core dependencies (langchain, etc.) are automatically installed with the package. You need to install at least one vector store backend (FAISS or ChromaDB) and provider-specific dependencies.
 
-### 5. Add URL Configuration (Optional, for API endpoints)
+### 4. Add URL Configuration (Optional, for API endpoints)
 
 In your main `urls.py` (e.g., `bakerydemo/urls.py`):
 ```python
@@ -95,7 +95,7 @@ urlpatterns += [
 After adding this, the API endpoint will be available at:
 - `http://localhost:8000/api/rag/chat/` - Chat endpoint (GET or POST)
 
-### 6. Add the Global Floating Chatbox to Your Templates
+### 5. Add the Global Floating Chatbox to Your Templates
 
 To render the bundled chat widget on every page (floating in the bottom-right corner), include this in a base template such as `base.html`:
 
@@ -199,6 +199,15 @@ WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION = True
 WAGTAIL_RAG_USE_HYBRID_SEARCH = True
 ```
 
+### API and Security
+
+```python
+# Max POST body size in bytes for the chat API (default: 1MB). Helps prevent DoS from huge payloads.
+WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE = 1024 * 1024
+```
+
+The chat endpoint (`/api/rag/chat/`) is CSRF-exempt so it can be called by external clients, scripts, or non-Django frontends. If the endpoint is public, protect it at the network or gateway level (e.g. authentication, rate limiting, or IP allowlisting).
+
 ### Model Indexing Configuration
 
 ```python
@@ -248,20 +257,18 @@ python manage.py build_rag_index
 Common variations:
 
 ```bash
-# Reset (clear) the existing index, then rebuild
-python manage.py build_rag_index --reset
-
-# Only reset/clear the collection without indexing
+# Only reset/clear the collection without indexing (no documents added)
 python manage.py build_rag_index --reset-only
 
 # Re-index a single page by ID (useful after editing one page)
 python manage.py build_rag_index --page-id 123
+```
 
-# Limit to specific models
-python manage.py build_rag_index --models blog.BlogPage breads.BreadPage
+Model selection is controlled by Django settings (`WAGTAIL_RAG_MODELS` and `WAGTAIL_RAG_EXCLUDE_MODELS`), not by CLI flags. To rebuild from scratch, clear first then index:
 
-# Exclude specific models
-python manage.py build_rag_index --exclude-models blog.DraftPage
+```bash
+python manage.py build_rag_index --reset-only
+python manage.py build_rag_index
 ```
 
 ### Using the Chatbot in Python
@@ -332,7 +339,7 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
   }'
 ```
 
-**Response:**
+**Response (200):**
 ```json
 {
   "answer": "We have several types of bread including...",
@@ -349,14 +356,17 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
 }
 ```
 
+**Error responses:**
+- **400** – Missing or invalid `question`, empty POST body, or invalid JSON (e.g. `{"error": "Invalid JSON: ..."}`).
+- **413** – Request body larger than `WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE` (default 1MB).
+- **500** – Server error; message is generic; details are logged on the server.
+
 ## How It Works
 
-1. **Indexing**: The `build_rag_index` command:
-   - Discovers all Wagtail Page models dynamically
-   - Extracts text from pages (title, body, StreamField, RichTextField, etc.)
-   - Converts pages to LangChain Document objects with intelligent chunking
-   - Generates embeddings using the configured embedding provider
-   - Stores chunks in FAISS or ChromaDB with deterministic IDs
+1. **Indexing**: When you run `python manage.py build_rag_index`:
+   - The command delegates to the shared index builder (`wagtail_rag.content_extraction.index_builder.build_rag_index`).
+   - The builder discovers Wagtail Page models from settings (`WAGTAIL_RAG_MODELS` or all page types), gets live pages, and for each page calls `wagtail_page_to_documents()` to turn it into LangChain Document objects (title, intro, and chunked body with title context).
+   - Each document gets metadata (page_id, page_type, slug, url, etc.); the builder adds model-level metadata (source, model, app) and upserts chunks into the vector store (FAISS or ChromaDB) with deterministic IDs. Old chunks for a page are removed before re-indexing so updates stay consistent.
 
 2. **Querying**: The chatbot:
    - Uses embedding-based similarity search to find relevant document chunks
@@ -379,11 +389,12 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
 
 ### "Collection expecting embedding with dimension of X, got Y"
 
-This error occurs when you change embedding providers/models without resetting the index. Different embedding models produce vectors of different dimensions.
+This error occurs when you change embedding providers or models without resetting the index. Different embedding models produce vectors of different dimensions.
 
-**Solution:**
+**Solution:** Clear the index, then rebuild:
 ```bash
-python manage.py build_rag_index --reset
+python manage.py build_rag_index --reset-only
+python manage.py build_rag_index
 ```
 
 ### "The model 'X' does not exist or you do not have access to it"
