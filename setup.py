@@ -35,11 +35,14 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
+        "Django>=3.2",
+        "wagtail>=4.0",
         "langchain>=0.1.0",
         "langchain-community>=0.0.20",
         "langchain-text-splitters>=0.0.1",
         "beautifulsoup4>=4.12.0",
         "tiktoken>=0.5.0",
+        "faiss-cpu>=1.7.4",  # Default vector store backend
     ],
     extras_require={
         # Vector store backends (install at least one)

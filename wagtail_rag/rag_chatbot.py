@@ -37,7 +37,6 @@ from .embeddings import get_embeddings
 # Import separated modules
 from .llm_providers import LLMGenerator
 from .embeddings import EmbeddingSearcher
-from .llm_providers.generation import LCEL_AVAILABLE as USE_LCEL
 
 
 def _is_wagtail_available():
@@ -223,7 +222,6 @@ class RAGChatBot:
                 return MultiQueryRetriever.from_llm(retriever=base_retriever, llm=self.llm)
             except Exception:
                 logger.warning("Failed to initialize MultiQueryRetriever, falling back to base retriever")
-                pass
         else:
             if not MULTI_QUERY_AVAILABLE:
                 logger.info("LLM Query Expansion disabled - MultiQueryRetriever not available")

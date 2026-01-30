@@ -19,7 +19,6 @@ PROVIDER_DEFAULTS: Dict[str, str] = {
     "hf": "sentence-transformers/all-MiniLM-L6-v2",
     "openai": "text-embedding-ada-002",
     "sentence_transformers": "sentence-transformers/all-MiniLM-L6-v2",
-    "sentence-transformers": "sentence-transformers/all-MiniLM-L6-v2",
 }
 
 

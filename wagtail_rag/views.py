@@ -69,7 +69,7 @@ def rag_chat_api(request):
         llm_provider = getattr(settings, 'WAGTAIL_RAG_LLM_PROVIDER', 'ollama')
         llm_model = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None) or 'default'
 
-        logger.warning(
+        logger.info(
             "wagtail_rag.chat API called | question=%r | llm=%s/%s",
             question,
             llm_provider,

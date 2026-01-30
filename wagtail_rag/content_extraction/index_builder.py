@@ -6,12 +6,17 @@ orchestrating page selection, document extraction, and vector store operations.
 It handles both ChromaDB and FAISS backends for storing embeddings.
 """
 
+import hashlib
+import logging
 import os
-from typing import Optional, Iterable, Callable, List
+from typing import Optional, Iterable, Callable, List, Tuple
 from django.conf import settings
 from django.apps import apps
 from wagtail.models import Page
 from .page_to_documents import wagtail_page_to_documents
+
+# Set up logger at module level
+logger = logging.getLogger(__name__)
 
 try:
     from langchain_core.documents import Document
@@ -168,8 +173,13 @@ class ChromaStore:
                         allow_dangerous_deserialization=True,
                     )
                     return
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Log warning when falling back to creating a new index
+                    logger.warning(
+                        "Failed to load existing FAISS index from '%s'; creating new empty index. Error: %s",
+                        index_path,
+                        str(e),
+                    )
             
             # Create new FAISS index
             test_embedding = embeddings.embed_query("test")
@@ -190,6 +200,7 @@ class ChromaStore:
             try:
                 self.db.delete_collection()
             except Exception:
+                # ChromaDB collection may not exist yet, ignore errors
                 pass
         elif self.backend == "faiss":
             # Delete FAISS files and reinitialize
@@ -273,7 +284,6 @@ class ChromaStore:
             return
         
         ids = []
-        counters = {}
 
         # Generate deterministic IDs based on page_id, section, and chunk index
         for doc in documents:
@@ -308,9 +318,13 @@ class ChromaStore:
             if existing_ids:
                 try:
                     self.db.delete(ids=existing_ids)
-                except Exception:
-                    # If delete fails, continue - add_documents will handle duplicates
-                    pass
+                except Exception as e:
+                    # Log deletion failures for diagnostics
+                    logger.warning(
+                        "FAISS delete failed for IDs %s during upsert (will proceed with add). Error: %s",
+                        existing_ids,
+                        str(e),
+                    )
             
             # Add new documents (will overwrite if IDs match after delete)
             self.db.add_documents(documents, ids=ids)
@@ -322,7 +336,7 @@ class ChromaStore:
 # Main Index Building Logic
 # ============================================================================
 
-def _parse_model_fields_shorthand(model_names: Optional[Iterable[str]]) -> tuple[list[str], Optional[list[str]]]:
+def _parse_model_fields_shorthand(model_names: Optional[Iterable[str]]) -> Tuple[List[str], Optional[List[str]]]:
     """
     Parse convenience syntax "app.Model:*" in model_names.
     

@@ -5,7 +5,7 @@ from wagtail_rag.content_extraction.index_builder import build_rag_index
 
 
 class Command(BaseCommand):
-    help = 'Extract data from models, chunk it, and store in ChromaDB for RAG chatbot'
+    help = 'Extract data from models, chunk it, and store in a vector store (FAISS or ChromaDB) for RAG chatbot'
 
     def add_arguments(self, parser):
         parser.add_argument(

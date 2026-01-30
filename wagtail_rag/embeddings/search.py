@@ -339,8 +339,13 @@ class EmbeddingSearcher:
                 existing_ids = {id(d) for d in title_docs}
                 other_docs = [d for d in docs if id(d) not in existing_ids]
                 return title_docs + other_docs[: self.k_value - len(title_docs)]
-        except Exception:
-            pass
+        except Exception as exc:
+            # Title boosting is optional; log and continue if it fails
+            logger.debug(
+                "Error while boosting title matches for query %r; returning original docs. Error: %s",
+                query,
+                exc,
+            )
 
         return docs
 
