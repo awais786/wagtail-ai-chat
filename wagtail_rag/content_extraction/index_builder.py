@@ -14,6 +14,11 @@ from wagtail.models import Page
 from .page_to_documents import wagtail_page_to_documents
 
 try:
+    from .smart_extractor import page_to_documents_new_extractor
+except ImportError:
+    page_to_documents_new_extractor = None
+
+try:
     from langchain_core.documents import Document
 except ImportError:
     from langchain.schema import Document
@@ -98,6 +103,45 @@ def get_live_pages(model: type, page_id: Optional[int] = None):
     if page_id:
         return qs.filter(id=page_id)
     return qs
+
+
+def get_content_field_names(model: type) -> List[str]:
+    """
+    Return field names on the model that are content-bearing (StreamField, RichTextField, TextField, CharField).
+    Used when WAGTAIL_RAG_MODELS includes "app.Model:*" to treat all content fields as important.
+    """
+    from django.db import models
+
+    skip = {
+        "id", "pk", "path", "depth", "numchild", "url_path", "draft_title",
+        "live", "has_unpublished_changes", "search_description", "go_live_at", "expire_at",
+        "first_published_at", "last_published_at", "latest_revision_id", "content_type_id",
+        "translation_key", "locale_id",
+    }
+    content_names = []
+    for f in model._meta.get_fields():
+        if not getattr(f, "name", None) or f.name in skip:
+            continue
+        if getattr(f, "remote_field", None):
+            continue
+        if getattr(f, "many_to_many", False) or getattr(f, "one_to_many", False):
+            continue
+        try:
+            if isinstance(f, (models.TextField, models.CharField)):
+                if isinstance(f, models.CharField) and getattr(f, "max_length", 0) and f.max_length < 100:
+                    continue
+                content_names.append(f.name)
+                continue
+        except Exception:
+            pass
+        try:
+            from wagtail.fields import RichTextField
+            from wagtail.blocks import StreamField
+            if isinstance(f, (RichTextField, StreamField)):
+                content_names.append(f.name)
+        except ImportError:
+            pass
+    return content_names
 
 
 # ============================================================================
@@ -378,9 +422,12 @@ def build_rag_index(
     if model_names is None:
         model_names = getattr(settings, "WAGTAIL_RAG_MODELS", None)
     
-    # Parse shorthand syntax "app.Model:*"
+    # Parse shorthand syntax "app.Model:*" (treat all content fields as important)
+    models_with_all_fields: set = set()
     if model_names:
-        model_names, _ = _parse_model_fields_shorthand(model_names)
+        model_names, auto_model_fields = _parse_model_fields_shorthand(model_names)
+        if auto_model_fields:
+            models_with_all_fields = {s.split(":", 1)[0] for s in auto_model_fields}
     
     # Get exclude models from settings if not provided
     if exclude_models is None:
@@ -469,17 +516,29 @@ def build_rag_index(
         else:
             _write(stdout, f"  Re-indexing page ID {page_id} from {model_name}...")
         
-        # Process each page
+        # When model is in "app.Model:*" list, use all content fields for extraction
+        use_all_fields = model_name in models_with_all_fields
+        streamfield_field_names = get_content_field_names(model) if use_all_fields else None
+        if use_all_fields and stdout:
+            _write(stdout, f"  Using all content fields for {model_name}: {streamfield_field_names or []}")
+
+        # Process each page (use new extractor by default when available)
+        use_new_extractor = getattr(settings, "WAGTAIL_RAG_USE_NEW_EXTRACTOR", True) and page_to_documents_new_extractor is not None
         for page in live_pages:
             try:
-                # Extract documents from page
-                documents = wagtail_page_to_documents(
-                    page,
-                    chunk_size=getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 500),
-                    chunk_overlap=getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 75),
-                    stdout=stdout,
-                )
-                
+                # Extract documents: use new extractor first, fall back to chunked extractor
+                documents = None
+                if use_new_extractor:
+                    documents = page_to_documents_new_extractor(page, stdout=stdout)
+                if documents is None or not documents:
+                    documents = wagtail_page_to_documents(
+                        page,
+                        chunk_size=getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 500),
+                        chunk_overlap=getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 75),
+                        stdout=stdout,
+                        streamfield_field_names=streamfield_field_names,
+                    )
+
                 if not documents:
                     continue
                 

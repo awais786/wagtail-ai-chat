@@ -4,18 +4,30 @@ A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. Th
 
 ## Features
 
-- **Automatic Page Indexing**: Automatically discovers and indexes all Wagtail Page models
-- **Intelligent Chunking**: Creates separate documents for title, intro, and body content with title context
-- **Hybrid Retrieval**: Combines vector similarity search with Wagtail's full-text search (optional)
-- **MultiQuery Retriever**: Uses LangChain's MultiQueryRetriever for query expansion (optional)
-- **Title-Based Boosting**: Prioritizes documents with matching titles for better relevance
-- **Metadata Filtering**: Filter results by page model, app, or custom metadata
-- **Deterministic IDs**: Enables efficient updates and single-page re-indexing
-- **Multiple LLM Providers**: Built-in support for **Ollama** (local), **OpenAI**, and **Anthropic** (hosted)
-- **Multiple Embedding Providers**: Support for OpenAI, HuggingFace, and Sentence Transformers
-- **Multiple Vector Stores**: Support for FAISS (default) and ChromaDB
-- **Generic & Reusable**: Works with any Wagtail project without hardcoding model names
-- **Configurable via Django Settings**: All options configurable through Django settings
+### Universal Compatibility
+- 🔌 **Plug-and-Play**: Works with **any Wagtail site** - no model-specific configuration required
+- 🎯 **Smart Field Detection**: Automatically discovers and extracts content from any page model
+- 🏗️ **Zero Assumptions**: No hardcoded field names or page type checks - works with custom models out-of-the-box
+- ⚙️ **Fully Configurable**: Customize field patterns and extraction behavior via Django settings (optional)
+
+### Content Extraction
+- 📝 **Adaptive Chunking**: Small pages stay whole, large pages are intelligently chunked
+- 🌳 **Multi-StreamField Support**: Handles multiple StreamFields per page (e.g., `body` + `backstory`)
+- 📄 **Rich Content**: Extracts from StreamField, RichTextField, TextField, and all standard Django fields
+- 🔗 **Relationships**: Includes ForeignKey and ManyToMany field values in metadata
+- 💬 **Natural Language**: Creates narrative-style documents for better LLM comprehension
+
+### RAG & Search
+- 🔍 **Hybrid Retrieval**: Combines vector similarity search with Wagtail's full-text search (optional)
+- 🎭 **MultiQuery Retriever**: Uses LangChain's MultiQueryRetriever for query expansion (optional)
+- 🏆 **Title-Based Boosting**: Prioritizes documents with matching titles for better relevance
+- 🏷️ **Metadata Filtering**: Filter results by page model, app, or custom metadata
+- 🆔 **Deterministic IDs**: Enables efficient updates and single-page re-indexing
+
+### Provider Flexibility
+- 🤖 **Multiple LLM Providers**: Built-in support for **Ollama** (local), **OpenAI**, and **Anthropic** (hosted)
+- 🧠 **Multiple Embedding Providers**: Support for OpenAI, HuggingFace, and Sentence Transformers
+- 💾 **Multiple Vector Stores**: Support for FAISS (default) and ChromaDB
 
 ## Installation
 
@@ -212,12 +224,14 @@ The chat endpoint (`/api/rag/chat/`) is CSRF-exempt so it can be called by exter
 
 ```python
 # Models to index (None = index all Page models).
-# You can use the shorthand "app.Model:*" here to say:
-#   "index this model and treat all its content fields as important".
+# Use "app.Model:*" to treat all content fields as important for that model:
+#   the default (chunked) extractor will use every content-bearing field
+#   (StreamField, RichTextField, TextField, long CharField) on the model.
+# Without ":*", only the default field list (body, content, backstory, instructions) is used.
 WAGTAIL_RAG_MODELS = [
     "blog.BlogPage",
-    "breads.BreadPage:*",       # index BreadPage, all fields
-    "products.ProductPage",     # index ProductPage, standard field extraction
+    "breads.BreadPage:*",       # index BreadPage using all content fields
+    "products.ProductPage",     # index ProductPage with default field list only
 ]
 
 # Models to exclude from indexing (always excluded, even if in WAGTAIL_RAG_MODELS)
@@ -230,7 +244,55 @@ WAGTAIL_RAG_EXCLUDE_MODELS = [
 # Text chunking configuration
 WAGTAIL_RAG_CHUNK_SIZE = 1000  # Size of each text chunk
 WAGTAIL_RAG_CHUNK_OVERLAP = 200  # Overlap between chunks
+
+# Use new extractor by default (SmartWagtailExtractor: adaptive chunking for any page)
+# Default True. Set False to use the original chunked extractor (page_to_documents) only.
+WAGTAIL_RAG_USE_NEW_EXTRACTOR = True
+# New extractor: chunk only when content exceeds this many characters (default 2000)
+WAGTAIL_RAG_NEW_EXTRACTOR_SIZE_THRESHOLD = 2000
+# New extractor: chunk large pages by section (title, intro, body, metadata) when True
+WAGTAIL_RAG_NEW_EXTRACTOR_CHUNK_BY_SECTION = True
 ```
+
+### Advanced Extractor Configuration (Optional)
+
+The new extractor (`SmartWagtailExtractor`) is **fully generic** and works with **any Wagtail site** without model-specific assumptions. It automatically detects field types and extracts content accordingly.
+
+**Default behavior works for most sites.** These settings are only needed for customization:
+
+```python
+# Maximum items to extract from ManyToMany fields (default: 10)
+WAGTAIL_RAG_MAX_METADATA_ITEMS = 10
+
+# Maximum length for text fields in metadata before truncation (default: 500)
+WAGTAIL_RAG_MAX_TEXT_FIELD_LENGTH = 500
+
+# Custom field name patterns for introduction/description fields
+# (default: ["introduction", "intro", "description", "summary", "excerpt", "lead", "standfirst"])
+WAGTAIL_RAG_INTRO_PATTERNS = ["introduction", "intro", "description", "excerpt"]
+
+# Custom field name patterns for main body/content fields
+# (default: ["body", "content", "main_content", "text", "streamfield", "page_body"])
+WAGTAIL_RAG_BODY_PATTERNS = ["body", "content", "main_content"]
+
+# Additional system fields to skip during extraction (optional)
+# Wagtail system fields are already skipped by default
+WAGTAIL_RAG_SKIP_FIELDS = {"custom_internal_field", "temp_data"}
+```
+
+**How the extractor works generically:**
+
+1. **Field Discovery**: Automatically finds intro, body, and metadata fields by field type and naming patterns
+2. **StreamFields**: Extracts ALL StreamFields (including non-body ones like `backstory` on RecipePage)
+3. **RichText**: Extracts plain text from RichTextField objects
+4. **Relationships**: Includes ForeignKey and ManyToMany field values
+5. **Narrative Structure**: Creates natural-language documents for better LLM understanding
+6. **No Model Assumptions**: Works with BlogPage, ProductPage, LocationPage, or any custom model
+
+**Example**: For a custom `EventPage` with fields `event_date`, `venue`, and `program` (StreamField), the extractor will automatically:
+- Extract `event_date` and `venue` as metadata
+- Extract `program` StreamField as body content
+- Create a document like: "Summer Festival. The event date is 2024-07-15. The venue is Central Park. [program content]"
 
 ### Custom Prompt Template (Optional)
 
@@ -270,6 +332,22 @@ Model selection is controlled by Django settings (`WAGTAIL_RAG_MODELS` and `WAGT
 python manage.py build_rag_index --reset-only
 python manage.py build_rag_index
 ```
+
+### Comparing extractors (new vs chunked)
+
+To compare the new extractor (SmartWagtailExtractor, default) with the original chunked extractor on a single page:
+
+```bash
+python manage.py compare_extractors --page-id 123
+```
+
+Optional: write full comparison to JSON for diffing:
+
+```bash
+python manage.py compare_extractors --page-id 123 --output /tmp/compare.json
+```
+
+The new extractor is used by default. Set `WAGTAIL_RAG_USE_NEW_EXTRACTOR = False` in settings to use only the chunked extractor.
 
 ### Using the Chatbot in Python
 
@@ -365,8 +443,8 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
 
 1. **Indexing**: When you run `python manage.py build_rag_index`:
    - The command delegates to the shared index builder (`wagtail_rag.content_extraction.index_builder.build_rag_index`).
-   - The builder discovers Wagtail Page models from settings (`WAGTAIL_RAG_MODELS` or all page types), gets live pages, and for each page calls `wagtail_page_to_documents()` to turn it into LangChain Document objects (title, intro, and chunked body with title context).
-   - Each document gets metadata (page_id, page_type, slug, url, etc.); the builder adds model-level metadata (source, model, app) and upserts chunks into the vector store (FAISS or ChromaDB) with deterministic IDs. Old chunks for a page are removed before re-indexing so updates stay consistent.
+   - The builder discovers Wagtail Page models from settings (`WAGTAIL_RAG_MODELS` or all page types), gets live pages, and for each page tries the **new extractor** (SmartWagtailExtractor) first by default. It converts pages to LangChain Document objects with adaptive chunking (small pages → one doc, large pages → chunked by section). If the new extractor returns nothing, it falls back to the **chunked extractor** (`wagtail_page_to_documents`: title, intro, chunked body with title context).
+   - Each document gets metadata (page_id, page_type, slug, url, section, chunk_index, doc_id, etc.); the builder adds model-level metadata (source, model, app) and upserts chunks into the vector store (FAISS or ChromaDB) with deterministic IDs. Old chunks for a page are removed before re-indexing so updates stay consistent.
 
 2. **Querying**: The chatbot:
    - Uses embedding-based similarity search to find relevant document chunks

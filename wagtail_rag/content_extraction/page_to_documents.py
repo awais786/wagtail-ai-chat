@@ -99,16 +99,24 @@ def extract_text_from_streamfield(streamfield) -> str:
     return " ".join(text_parts)
 
 
-def _chunk_streamfield(page: Page, base_metadata: dict, chunk_size: int, chunk_overlap: int, stdout: Optional[Callable[[str], None]] = None) -> List[Document]:
+def _chunk_streamfield(
+    page: Page,
+    base_metadata: dict,
+    chunk_size: int,
+    chunk_overlap: int,
+    stdout: Optional[Callable[[str], None]] = None,
+    streamfield_field_names: Optional[List[str]] = None,
+) -> List[Document]:
     """
-    Extract and chunk StreamField content from a page.
-    
-    Returns a list of Document objects for the body content.
+    Extract and chunk StreamField/content field text from a page.
+
+    When streamfield_field_names is provided (e.g. from WAGTAIL_RAG_MODELS "app.Model:*"),
+    only those fields are used; otherwise defaults to body, content, backstory, instructions.
     """
     documents = []
-    streamfield_fields = ['body', 'content', 'backstory', 'instructions']
+    streamfield_fields = streamfield_field_names if streamfield_field_names is not None else ["body", "content", "backstory", "instructions"]
     body_texts = []
-    
+
     if stdout:
         stdout(f"  Checking for body content in fields: {', '.join(streamfield_fields)}")
     
@@ -189,6 +197,7 @@ def wagtail_page_to_documents(
     chunk_size: int = 500,
     chunk_overlap: int = 75,
     stdout: Optional[Callable[[str], None]] = None,
+    streamfield_field_names: Optional[List[str]] = None,
 ) -> List[Document]:
     """
     Convert a Wagtail page to multiple Document objects with intelligent chunking.
@@ -201,7 +210,8 @@ def wagtail_page_to_documents(
         chunk_size: Size of text chunks (default: 500)
         chunk_overlap: Overlap between chunks (default: 75)
         stdout: Optional output function to print documents (for debugging)
-    
+        streamfield_field_names: Optional list of field names for body content (e.g. from "app.Model:*")
+
     Returns:
         List of Document objects ready for indexing
     """
@@ -224,13 +234,12 @@ def wagtail_page_to_documents(
         "url": get_page_url(page),
     }
     
+    body_field_list = streamfield_field_names if streamfield_field_names is not None else ["body", "content", "backstory", "instructions"]
     if stdout:
-        # Debug: Show all fields on the page
-        all_fields = [f.name for f in page._meta.get_fields() if hasattr(f, 'name')]
-        streamfield_fields = ['body', 'content', 'backstory', 'instructions']
-        found_fields = [f for f in streamfield_fields if f in all_fields]
+        all_fields = [f.name for f in page._meta.get_fields() if hasattr(f, "name")]
+        found_fields = [f for f in body_field_list if f in all_fields]
         if not found_fields:
-            stdout(f"  Debug: Page has {len(all_fields)} fields, but none of {streamfield_fields} were found.")
+            stdout(f"  Debug: Page has {len(all_fields)} fields, but none of {body_field_list} were found.")
             stdout(f"  Available fields include: {', '.join(all_fields[:20])}{'...' if len(all_fields) > 20 else ''}")
 
     # Title
@@ -282,8 +291,8 @@ def wagtail_page_to_documents(
             stdout(f"    Metadata: {intro_doc.metadata}")
             stdout("")
 
-    # Body handled by chunking function
-    body_docs = _chunk_streamfield(page, base_meta, chunk_size, chunk_overlap, stdout)
+    # Body handled by chunking function (uses streamfield_field_names when provided, e.g. from "app.Model:*")
+    body_docs = _chunk_streamfield(page, base_meta, chunk_size, chunk_overlap, stdout, streamfield_field_names=streamfield_field_names)
     documents.extend(body_docs)
 
     if stdout:
