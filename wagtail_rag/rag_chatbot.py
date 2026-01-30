@@ -82,11 +82,22 @@ class RAGChatBot:
         """
         # Initialize configuration
         self.collection_name = collection_name or getattr(settings, 'WAGTAIL_RAG_COLLECTION_NAME', 'wagtail_rag')
-        self.persist_directory = persist_directory or getattr(
-            settings,
-            'WAGTAIL_RAG_CHROMA_PATH',
-            os.path.join(settings.BASE_DIR, 'chroma_db')
-        )
+        # Support new setting name with backward compatibility for old name
+        if persist_directory is None:
+            persist_directory = getattr(settings, 'WAGTAIL_RAG_VECTOR_STORE_PATH', None)
+            if persist_directory is None:
+                # Fallback to deprecated setting name
+                persist_directory = getattr(
+                    settings,
+                    'WAGTAIL_RAG_CHROMA_PATH',
+                    os.path.join(settings.BASE_DIR, 'chroma_db')
+                )
+                # Log deprecation warning if old setting is used
+                if hasattr(settings, 'WAGTAIL_RAG_CHROMA_PATH'):
+                    logger.warning(
+                        "WAGTAIL_RAG_CHROMA_PATH is deprecated. Please use WAGTAIL_RAG_VECTOR_STORE_PATH instead."
+                    )
+        self.persist_directory = persist_directory
         self.llm_provider = llm_provider or getattr(settings, 'WAGTAIL_RAG_LLM_PROVIDER', 'ollama')
         self.model_name = model_name or getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None)
         self.metadata_filter = metadata_filter or {}

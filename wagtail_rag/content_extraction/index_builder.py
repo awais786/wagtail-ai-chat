@@ -412,11 +412,22 @@ def build_rag_index(
     
     # Get vector store configuration
     vector_store_backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss")
-    persist_directory = getattr(
-        settings,
-        "WAGTAIL_RAG_CHROMA_PATH",  # Path for vector store (works for both ChromaDB and FAISS)
-        os.path.join(settings.BASE_DIR, "chroma_db"),
-    )
+    # Support new setting name with backward compatibility for old name
+    persist_directory = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_PATH", None)
+    if persist_directory is None:
+        # Fallback to deprecated setting name
+        persist_directory = getattr(
+            settings,
+            "WAGTAIL_RAG_CHROMA_PATH",
+            os.path.join(settings.BASE_DIR, "chroma_db"),
+        )
+        # Log deprecation warning if old setting is used
+        if hasattr(settings, "WAGTAIL_RAG_CHROMA_PATH"):
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "WAGTAIL_RAG_CHROMA_PATH is deprecated. Please use WAGTAIL_RAG_VECTOR_STORE_PATH instead."
+            )
     collection_name = getattr(
         settings,
         "WAGTAIL_RAG_COLLECTION_NAME",

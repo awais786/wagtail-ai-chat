@@ -140,7 +140,7 @@ OPENAI_API_KEY = "sk-..."  # or configure via environment variable
 # Vector Store Configuration (choose FAISS or ChromaDB)
 WAGTAIL_RAG_VECTOR_STORE_BACKEND = "faiss"  # or "chroma"
 WAGTAIL_RAG_COLLECTION_NAME = "wagtail_rag"
-WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, "faiss_index")  # Path for vector store (works for both FAISS and ChromaDB)
+WAGTAIL_RAG_VECTOR_STORE_PATH = os.path.join(BASE_DIR, "faiss_index")  # Path for vector store (works for both FAISS and ChromaDB)
 ```
 
 ### 2. Build the Index
@@ -187,7 +187,8 @@ WAGTAIL_RAG_VECTOR_STORE_BACKEND = 'faiss'
 WAGTAIL_RAG_COLLECTION_NAME = 'wagtail_rag'
 
 # Vector store directory (works for both FAISS and ChromaDB)
-WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'faiss_index')
+WAGTAIL_RAG_VECTOR_STORE_PATH = os.path.join(BASE_DIR, 'faiss_index')
+# Note: WAGTAIL_RAG_CHROMA_PATH is deprecated, use WAGTAIL_RAG_VECTOR_STORE_PATH instead
 
 # Number of documents to retrieve (default: 8)
 WAGTAIL_RAG_RETRIEVE_K = 8
@@ -416,6 +417,18 @@ WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
   - **OpenAI**: `pip install wagtail-rag[openai]`
   - **Ollama**: `pip install wagtail-rag[ollama]`
   - **All providers**: `pip install wagtail-rag[all]`
+
+### FAISS Concurrent Indexing
+
+**Important**: When using FAISS as the vector store backend, avoid running `build_rag_index` concurrently (multiple processes/threads indexing simultaneously). FAISS does not have built-in file locking, so concurrent writes can corrupt the index or cause data loss.
+
+**Recommended approach**:
+- Run indexing operations sequentially (one at a time)
+- Use task queues (e.g., Celery) to serialize indexing jobs
+- For production deployments, consider using ChromaDB if concurrent indexing is required
+
+**Single-page updates are safe**: You can safely re-index a single page using `--page-id` even if the index is being read by queries.
+
 
 ## Requirements
 
