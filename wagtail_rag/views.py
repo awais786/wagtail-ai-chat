@@ -5,6 +5,7 @@ This module provides API endpoints for querying the RAG chatbot.
 """
 import json
 import logging
+import re
 from typing import Optional
 
 from django.conf import settings
@@ -19,6 +20,42 @@ logger = logging.getLogger(__name__)
 
 # Max POST body size (1MB) to avoid DoS from huge payloads
 MAX_REQUEST_BODY_SIZE = getattr(settings, "WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE", 1024 * 1024)
+
+# Max question length to prevent abuse
+MAX_QUESTION_LENGTH = getattr(settings, "WAGTAIL_RAG_MAX_QUESTION_LENGTH", 1000)
+
+
+def validate_question(question: str) -> tuple[bool, Optional[str]]:
+    """
+    Validate user question input.
+    
+    Args:
+        question: User question string
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not question or not question.strip():
+        return False, "Question cannot be empty"
+    
+    if len(question) > MAX_QUESTION_LENGTH:
+        return False, f"Question too long (max {MAX_QUESTION_LENGTH} characters)"
+    
+    # Check for suspicious patterns (basic protection)
+    # Note: LLM providers have their own prompt injection protection
+    suspicious_patterns = [
+        r'<script[^>]*>',  # Script tags
+        r'javascript:',     # JavaScript URLs
+        r'on\w+\s*=',      # Event handlers
+    ]
+    
+    for pattern in suspicious_patterns:
+        if re.search(pattern, question, re.IGNORECASE):
+            logger.warning(f"Suspicious pattern detected in question: {pattern}")
+            # Don't reject, just log - LLM will handle safely
+    
+    return True, None
+
 
 
 @csrf_exempt
@@ -83,11 +120,10 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             metadata_filter = data.get("filter")
             llm_kwargs = data.get("llm_kwargs") or {}
 
-        if not question:
-            return JsonResponse(
-                {"error": "Question is required. Use 'q' for GET or 'question' for POST."},
-                status=400,
-            )
+        # Validate question input
+        is_valid, error_msg = validate_question(question)
+        if not is_valid:
+            return JsonResponse({"error": error_msg}, status=400)
 
         llm_provider = getattr(settings, "WAGTAIL_RAG_LLM_PROVIDER", "ollama")
         llm_model = getattr(settings, "WAGTAIL_RAG_MODEL_NAME", None) or "default"
@@ -103,9 +139,18 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
         result = chatbot.query(question)
         return JsonResponse(result)
 
+    except ValueError as e:
+        # Configuration or input validation errors
+        logger.warning("RAG chat API validation error: %s", str(e))
+        return JsonResponse({"error": f"Invalid input: {str(e)}"}, status=400)
+    except ImportError as e:
+        # Missing dependencies
+        logger.error("RAG chat API dependency error: %s", str(e))
+        return JsonResponse({"error": "Service configuration error. Please contact support."}, status=500)
     except Exception:
-        logger.exception("RAG chat API error")
-        return JsonResponse({"error": "An error occurred processing your request."}, status=500)
+        # Unexpected errors - log details but return generic message
+        logger.exception("RAG chat API unexpected error")
+        return JsonResponse({"error": "An unexpected error occurred. Please try again later."}, status=500)
 
 
 def rag_chatbox_widget(request: HttpRequest) -> HttpResponse:
