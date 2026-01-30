@@ -1,12 +1,12 @@
 """
-RAG Chatbot using LangChain and ChromaDB.
+RAG Chatbot using LangChain and vector stores (FAISS/ChromaDB).
 
 This module provides a RAG (Retrieval-Augmented Generation) chatbot
 that uses the indexed content from Wagtail pages.
 
 The chatbot orchestrates two main components:
-1. Embedding Search (embeddings/search.py) - retrieves relevant documents
-2. LLM Generation (providers/generation.py) - generates answers using LLM
+1. Embedding Search (embeddings/search.py) - retrieves relevant documents using vector similarity
+2. LLM Generation (llm_providers/generation.py) - generates answers using LLM
 """
 import os
 import logging
@@ -51,11 +51,11 @@ def _is_wagtail_available():
 
 class RAGChatBot:
     """
-    RAG Chatbot that retrieves context from vector store (ChromaDB or FAISS) and generates responses.
+    RAG Chatbot that retrieves context from vector store (FAISS or ChromaDB) and generates responses.
 
     High‑level flow for a question:
       1. Embed the query and retrieve the most relevant chunks from vector store
-         (plus optional Wagtail full‑text results).
+         (plus optional Wagtail full‑text results via hybrid search).
       2. Concatenate those chunks into a single context string.
       3. Call the configured LLM with a prompt that contains {context, question}.
       4. Return the LLM's answer together with the source documents.

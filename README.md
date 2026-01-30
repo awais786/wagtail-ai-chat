@@ -1,19 +1,21 @@
 # Wagtail RAG Chatbot
 
-A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. This Django app provides a complete RAG solution that indexes your Wagtail pages into FAISS and provides a chatbot interface using LangChain with support for multiple LLM and embedding providers.
+A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. This Django app provides a complete RAG solution that indexes your Wagtail pages into FAISS or ChromaDB and provides a chatbot interface using LangChain with support for multiple LLM and embedding providers.
 
 ## Features
 
 - **Automatic Page Indexing**: Automatically discovers and indexes all Wagtail Page models
-- **Hybrid Search**: Combines FAISS vector search with Wagtail's built-in full-text search
-- **MultiQuery Retriever**: Uses LangChain's MultiQueryRetriever for better query understanding
-- **Fuzzy Matching**: Handles typos and partial matches in search queries
-- **Metadata Filtering**: Filter search results by page model, app, or custom metadata
+- **Intelligent Chunking**: Creates separate documents for title, intro, and body content with title context
+- **Hybrid Retrieval**: Combines vector similarity search with Wagtail's full-text search (optional)
+- **MultiQuery Retriever**: Uses LangChain's MultiQueryRetriever for query expansion (optional)
+- **Title-Based Boosting**: Prioritizes documents with matching titles for better relevance
+- **Metadata Filtering**: Filter results by page model, app, or custom metadata
 - **Deterministic IDs**: Enables efficient updates and single-page re-indexing
-- **Multiple LLM Providers**: Built-in support for **Ollama** (local) and **OpenAI** (hosted)
+- **Multiple LLM Providers**: Built-in support for **Ollama** (local), **OpenAI**, and **Anthropic** (hosted)
 - **Multiple Embedding Providers**: Support for OpenAI, HuggingFace, and Sentence Transformers
+- **Multiple Vector Stores**: Support for FAISS (default) and ChromaDB
 - **Generic & Reusable**: Works with any Wagtail project without hardcoding model names
-- **Configurable via Django Settings**: All options configurable through Django settings (no command-line args required)
+- **Configurable via Django Settings**: All options configurable through Django settings
 
 ## Installation
 
@@ -90,13 +92,12 @@ urlpatterns += [
 
 **Important**: Place `wagtail_rag_urls` before `wagtail_urls` so API routes are matched first.
 
-After adding this, the API endpoints will be available at:
+After adding this, the API endpoint will be available at:
 - `http://localhost:8000/api/rag/chat/` - Chat endpoint (GET or POST)
-- `http://localhost:8000/api/rag/search/` - Search endpoint (GET or POST)
 
 ### 6. Add the Global Floating Chatbox to Your Templates
 
-To render the bundled chat/search widget on every page (floating in the bottom-right corner), include this in a base template such as `base.html`:
+To render the bundled chat widget on every page (floating in the bottom-right corner), include this in a base template such as `base.html`:
 
 ```django
 {# Global RAG chatbox (from wagtail_rag) shown on all pages, floating bottom-right #}
@@ -136,9 +137,10 @@ WAGTAIL_RAG_MODEL_NAME = "gpt-4"
 OPENAI_API_KEY = "sk-..."  # or configure via environment variable
 
 
-# Vector Store Configuration (choose ChromaDB or FAISS)
+# Vector Store Configuration (choose FAISS or ChromaDB)
+WAGTAIL_RAG_VECTOR_STORE_BACKEND = "faiss"  # or "chroma"
 WAGTAIL_RAG_COLLECTION_NAME = "wagtail_rag"
-WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, "faiss_index")  # Path for FAISS index
+WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, "faiss_index")  # Path for vector store (works for both FAISS and ChromaDB)
 ```
 
 ### 2. Build the Index
@@ -178,10 +180,13 @@ print(result['answer'])
 ### Basic Settings
 
 ```python
-# FAISS index name
+# Vector store backend (faiss or chroma)
+WAGTAIL_RAG_VECTOR_STORE_BACKEND = 'faiss'
+
+# Collection/index name
 WAGTAIL_RAG_COLLECTION_NAME = 'wagtail_rag'
 
-# FAISS index directory
+# Vector store directory (works for both FAISS and ChromaDB)
 WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'faiss_index')
 
 # Number of documents to retrieve (default: 8)
@@ -243,7 +248,7 @@ python manage.py build_rag_index
 Common variations:
 
 ```bash
-# Reset (clear) the existing FAISS index, then rebuild the index
+# Reset (clear) the existing index, then rebuild
 python manage.py build_rag_index --reset
 
 # Only reset/clear the collection without indexing
@@ -283,13 +288,6 @@ chatbot_openai = get_chatbot(
     llm_kwargs={'temperature': 0.7}
 )
 result = chatbot_openai.query("What content do you have?")
-
-# Search without generating response (embedding search only, no LLM)
-results = chatbot.search_with_embeddings("multigrain bread", k=10)
-for result in results:
-    print(f"Title: {result['metadata']['title']}")
-    print(f"Score: {result['score']}")
-    print(f"Content: {result['content'][:200]}...")
 ```
 
 ### Using the API Endpoints
@@ -351,76 +349,31 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
 }
 ```
 
-#### Search API (`/api/rag/search/`)
-
-The search API performs semantic search without generating an AI response. Useful for finding relevant content.
-
-**GET Request:**
-```bash
-# Basic search
-curl "http://localhost:8000/api/rag/search/?q=sourdough bread"
-
-# With number of results
-curl "http://localhost:8000/api/rag/search/?q=sourdough bread&k=5"
-
-# With metadata filter
-curl "http://localhost:8000/api/rag/search/?q=bread&filter=%7B%22model%22%3A%22BreadPage%22%7D"
-```
-
-**POST Request:**
-```bash
-curl -X POST http://localhost:8000/api/rag/search/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "sourdough bread",
-    "k": 5,
-    "filter": {"model": "BreadPage"}
-  }'
-```
-
-**Response:**
-```json
-{
-  "query": "sourdough bread",
-  "results": [
-    {
-      "content": "...",
-      "metadata": {
-        "title": "Sourdough Bread Recipe",
-        "url": "/breads/sourdough/",
-        "model": "BreadPage"
-      },
-      "score": 0.8234
-    }
-  ],
-  "count": 5
-}
-```
-
 ## How It Works
 
 1. **Indexing**: The `build_rag_index` command:
    - Discovers all Wagtail Page models dynamically
    - Extracts text from pages (title, body, StreamField, RichTextField, etc.)
-   - Chunks the text using RecursiveCharacterTextSplitter
+   - Converts pages to LangChain Document objects with intelligent chunking
    - Generates embeddings using the configured embedding provider
-   - Stores chunks in ChromaDB with deterministic IDs
+   - Stores chunks in FAISS or ChromaDB with deterministic IDs
 
 2. **Querying**: The chatbot:
-   - Uses MultiQueryRetriever to generate query variations
-   - Searches FAISS for similar chunks
-   - Optionally searches Wagtail's full-text index (hybrid search)
+   - Uses embedding-based similarity search to find relevant document chunks
+   - Optionally combines with Wagtail's full-text search (hybrid search)
+   - Uses MultiQueryRetriever for query expansion (if enabled)
    - Combines and deduplicates results
    - Boosts documents with matching titles (handles typos)
    - Passes context to LLM for answer generation
 
 ## Architecture
 
-- **Vector Store**: FAISS for storing embeddings
+- **Vector Store**: FAISS or ChromaDB for storing embeddings
 - **Embeddings**: Multiple providers supported (HuggingFace, OpenAI, Sentence Transformers)
-- **LLM**: Multiple providers supported (Ollama, OpenAI; extensible to others)
+- **LLM**: Multiple providers supported (Ollama, OpenAI, Anthropic; extensible to others)
 - **Framework**: LangChain for orchestration
-- **Search**: Hybrid search (FAISS + Wagtail full-text)
+- **Retrieval**: Hybrid search (vector similarity + optional Wagtail full-text)
+- **Document Processing**: Intelligent chunking with title context for better semantic understanding
 
 ## Troubleshooting
 
@@ -495,7 +448,7 @@ pip install wagtail-rag[all]
 
 ## Example Configuration
 
-See [CONFIGURATION_EXAMPLE.py](CONFIGURATION_EXAMPLE.py) for a complete example of all available settings.
+All configuration is done via Django settings. See the "Configuration" section above for all available settings.
 
 ## License
 
