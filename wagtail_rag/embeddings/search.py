@@ -114,15 +114,14 @@ class EmbeddingSearcher:
 
         # Try modern retriever API first (supports MultiQueryRetriever)
         try:
-            logger.debug("Using retriever.invoke() (may use MultiQueryRetriever with LLM query expansion)")
+            logger.debug("Using retriever.invoke() for vector search")
             docs = self.retriever.invoke(query)
         except Exception as e:
-            logger.debug("retriever.invoke failed, falling back to vectorstore: %s", e)
+            logger.debug("retriever.invoke failed (%s), falling back to vectorstore.similarity_search()", e)
             try:
-                logger.debug("Fallback: Using direct vectorstore.similarity_search()")
                 docs = self.vectorstore.similarity_search(query, k=self.k_value)
             except Exception as e2:
-                logger.error("Vector search failed, returning empty results: %s", e2)
+                logger.error("Vector search failed: %s", e2)
                 docs = []
 
         # Track URLs and IDs for deduplication (used when combining with Wagtail results)
@@ -246,28 +245,22 @@ class EmbeddingSearcher:
             # Normalize query for better Wagtail search matching
             normalized_query = self._normalize_query_for_wagtail(query)
             if normalized_query != query:
-                logger.info(f"Normalized Wagtail query: '{query}' -> '{normalized_query}'")
+                logger.debug(f"Normalized Wagtail query: '{query}' -> '{normalized_query}'")
             
             # Use Wagtail's full-text search (PostgreSQL or Elasticsearch)
-            # Try normalized query first, fallback to original if needed
             wagtail_results = Page.objects.live().search(normalized_query)[:10]
-            logger.info(f"Wagtail search returned {len(wagtail_results)} pages for query: '{query}'")
+            logger.debug(f"Wagtail search returned {len(wagtail_results)} pages")
             
-            if len(wagtail_results) == 0:
-                # Try original query if normalized query found nothing
-                if normalized_query != query:
-                    logger.info(f"Trying original query '{query}' after normalized query '{normalized_query}' found 0 results")
-                    wagtail_results = Page.objects.live().search(query)[:10]
+            # If normalized query found nothing, try original
+            if len(wagtail_results) == 0 and normalized_query != query:
+                logger.debug(f"Trying original query after normalized query found 0 results")
+                wagtail_results = Page.objects.live().search(query)[:10]
                 
-                if len(wagtail_results) == 0:
-                    logger.warning(
-                        f"Wagtail search found 0 pages for query: '{query}' (normalized: '{normalized_query}'). "
-                        f"This might mean:\n"
-                        f"  1. No pages contain this keyword in their searchable content\n"
-                        f"  2. Wagtail search index needs to be updated (run: python manage.py update_index)\n"
-                        f"  3. Pages might not be published/live\n"
-                        f"  4. Query might be too vague or use words not in your content"
-                    )
+            if len(wagtail_results) == 0:
+                logger.debug(
+                    f"Wagtail search found 0 pages for query: '{query}'. "
+                    f"Check: 1) Content is indexed, 2) Pages are live, 3) Search index is updated (python manage.py update_index)"
+                )
             
             skipped_count = 0
             for page in wagtail_results:
@@ -280,30 +273,17 @@ class EmbeddingSearcher:
                     logger.debug(f"Skipping duplicate page: {page_url} (ID: {page_id})")
                     continue
 
-                # Convert Wagtail Page to Document objects (same structure as indexed documents)
+                # Convert Wagtail Page to Document objects
                 page_docs = self._convert_wagtail_page_to_documents(page)
                 if page_docs:
                     docs.extend(page_docs)
-                    # Track to avoid duplicates in future iterations
                     seen_urls.add(page_url)
                     seen_ids.add(page_id)
-                    logger.debug(f"Added {len(page_docs)} document(s) from Wagtail page: {page_url} (ID: {page_id})")
+                    logger.debug(f"Added {len(page_docs)} document(s) from page ID: {page_id}")
             
             if skipped_count > 0:
-                logger.info(
-                    f"Deduplication: Skipped {skipped_count} out of {len(wagtail_results)} Wagtail pages "
-                    f"for query: '{query}' because they were already found in vector search. "
-                    f"This is expected behavior - preventing duplicate results."
-                )
-                
-            if skipped_count == len(wagtail_results) and len(wagtail_results) > 0:
-                logger.info(
-                    f"All {len(wagtail_results)} Wagtail search results were duplicates of vector search results "
-                    f"for query: '{query}'. This means:\n"
-                    f"  - Wagtail search is working correctly\n"
-                    f"  - Vector search already found all relevant pages\n"
-                    f"  - No duplicate results will be returned (good!)\n"
-                    f"  - This is normal when your content is well-indexed in the vector database"
+                logger.debug(
+                    f"Deduplicated {skipped_count}/{len(wagtail_results)} Wagtail results (already in vector search)"
                 )
         except Exception as e:
             # Log exception but keep search resilient in non-Wagtail environments
@@ -397,61 +377,39 @@ class EmbeddingSearcher:
             List of Document objects ranked by relevance
         """
         # Step 1: Always perform vector search (primary search method)
-        logger.info(f"Starting vector search for query: '{query}'")
+        logger.info(f"Searching for: '{query}'")
         vector_docs, seen_urls, seen_ids = self._get_vector_docs(query)
-        logger.info(f"Vector search found {len(vector_docs)} documents for query: '{query}'")
+        logger.debug(f"Vector search: {len(vector_docs)} documents")
         
         # Step 2: Optionally add Wagtail search results (only if hybrid search is enabled)
         wagtail_docs = []
         if self.use_hybrid_search:
-            logger.info(f"Starting Wagtail search for query: '{query}'")
             wagtail_docs = self._get_wagtail_docs(query, seen_urls, seen_ids)
-            logger.info(f"Wagtail search found {len(wagtail_docs)} additional documents (after deduplication) for query: '{query}'")
+            logger.debug(f"Wagtail search: {len(wagtail_docs)} additional documents")
             
-            # Warn if Wagtail search didn't add any new results
-            if len(wagtail_docs) == 0 and len(vector_docs) > 0:
-                logger.info(
-                    f"Hybrid search enabled for query: '{query}'. "
-                    f"Vector search found {len(vector_docs)} documents. "
-                    f"Wagtail search found 0 additional unique documents (all were duplicates or no matches). "
-                    f"This is normal - it means your vector search is comprehensive and already found all relevant pages."
-                )
-            elif len(wagtail_docs) == 0 and len(vector_docs) == 0:
+            # Log if no results at all
+            if len(wagtail_docs) == 0 and len(vector_docs) == 0:
                 logger.warning(
-                    f"Both vector and Wagtail search returned 0 results for query: '{query}'. "
-                    f"Consider:\n"
-                    f"  1. Checking if content is indexed (run: python manage.py build_rag_index)\n"
-                    f"  2. Updating Wagtail search index (run: python manage.py update_index)\n"
-                    f"  3. Verifying the query matches your content"
+                    f"No results found for '{query}'. "
+                    f"Check: 1) Content is indexed (python manage.py build_rag_index), "
+                    f"2) Search index is updated (python manage.py update_index)"
                 )
         else:
-            logger.debug(f"Hybrid search (Wagtail) skipped (hybrid search disabled)")
-        # If use_hybrid_search is False, wagtail_docs will be empty list
-
-        # Step 3: Combine results (vector search + optional Wagtail search)
+            logger.debug(f"Hybrid search disabled")
+        
+        # Step 3: Combine and limit results
         all_docs = vector_docs + wagtail_docs
-        logger.info(f"Search Summary: Total documents after combining: {len(all_docs)} (vector: {len(vector_docs)}, wagtail: {len(wagtail_docs)})")
-        
-        # Info message if results are the same as vector-only (this is actually good - means comprehensive indexing)
-        if self.use_hybrid_search and len(wagtail_docs) == 0 and len(all_docs) == len(vector_docs) and len(vector_docs) > 0:
-            logger.info(
-                f"Hybrid search results for query: '{query}': "
-                f"Returning {len(all_docs)} documents from vector search. "
-                f"Wagtail search verified these results (no additional unique pages found). "
-                f"This indicates your vector database has comprehensive coverage of your content."
-            )
-        
-        # Step 4: Limit to top K documents
         docs = all_docs[: self.k_value]
+        logger.debug(f"Combined: {len(all_docs)} total ({len(vector_docs)} vector + {len(wagtail_docs)} wagtail)")
 
-        # Step 5: Boost title matches for short queries (e.g., "Bread")
+        # Step 4: Boost title matches for short queries
         docs = self._boost_title_matches_if_short_query(query, docs)
 
-        # Step 6: Re-rank by title similarity if enabled
+        # Step 5: Re-rank by title similarity if enabled
         if boost_title_matches and docs:
             docs = self._rerank_by_title_match(query, docs)
 
-        logger.info(f"Search Complete: Returning {len(docs)} documents for query: '{query}'")
+        logger.info(f"Returning {len(docs)} document(s) for '{query}'")
         return docs
 
     def _deduplicate_results(self, raw_results: List[Tuple[Document, float]], k: int) -> List[Tuple[Document, float]]:

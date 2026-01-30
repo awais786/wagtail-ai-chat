@@ -64,19 +64,29 @@ class OllamaProvider(BaseLLMProvider):
                 "Set WAGTAIL_RAG_MODEL_NAME in settings or install a model: ollama pull <model_name>"
             )
         
-        try:
-            # Modern LangChain standard
-            from langchain_community.chat_models import ChatOllama  # type: ignore
-            return ChatOllama(model=model_name, **kwargs)
-        except (ImportError, ModuleNotFoundError):
+        # Try multiple import paths for Ollama
+        ChatOllama = None
+        import_paths = [
+            ("langchain_community.chat_models", "ChatOllama"),
+            ("langchain_community.llms", "Ollama"),
+        ]
+        
+        for module_path, class_name in import_paths:
             try:
-                # Legacy fallback
-                from langchain_community.llms import Ollama  # type: ignore
-                return Ollama(model=model_name, **kwargs)
-            except ImportError as e:
-                raise ImportError(
-                    "Ollama not found. Run: pip install langchain-community ollama"
-                ) from e
+                module = __import__(module_path, fromlist=[class_name])
+                ChatOllama = getattr(module, class_name)
+                break
+            except (ImportError, AttributeError, ModuleNotFoundError):
+                continue
+        
+        if ChatOllama is None:
+            raise ImportError(
+                "Ollama not found. Run: pip install langchain-community ollama"
+            )
+        
+        # Try to instantiate the model
+        try:
+            return ChatOllama(model=model_name, **kwargs)
         except Exception as e:
             # Catch model not found errors and provide helpful message
             error_msg = str(e).lower()

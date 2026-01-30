@@ -19,7 +19,7 @@ PROVIDER_DEFAULTS: Dict[str, str] = {
     "hf": "sentence-transformers/all-MiniLM-L6-v2",
     "openai": "text-embedding-ada-002",
     "sentence_transformers": "sentence-transformers/all-MiniLM-L6-v2",
-    "sentence-transformers": "sentence-transformers/all-MiniLM-L6-v2",
+    "sentence-transformers": "sentence-transformers/all-MiniLM-L6-v2",  # Same as above (hyphen variant)
 }
 
 
@@ -50,19 +50,26 @@ class BaseEmbeddingProvider:
 
 class HuggingFaceProvider(BaseEmbeddingProvider):
     def create(self, model_name: Optional[str], **kwargs) -> Any:
-        try:
-            # Prefer the standard langchain embedding interface when available
-            from langchain.embeddings import HuggingFaceEmbeddings  # type: ignore
-        except Exception:
+        # Try multiple import paths for HuggingFace embeddings
+        HuggingFaceEmbeddings = None
+        import_paths = [
+            ("langchain.embeddings", "HuggingFaceEmbeddings"),
+            ("langchain_huggingface", "HuggingFaceEmbeddings"),
+            ("langchain_community.embeddings", "HuggingFaceEmbeddings"),
+        ]
+        
+        for module_path, class_name in import_paths:
             try:
-                from langchain_huggingface import HuggingFaceEmbeddings  # type: ignore
-            except Exception:
-                try:
-                    from langchain_community.embeddings import HuggingFaceEmbeddings  # type: ignore
-                except Exception as e:
-                    raise ImportError(
-                        "HuggingFace embeddings are not installed. Install: pip install sentence-transformers langchain-huggingface"
-                    ) from e
+                module = __import__(module_path, fromlist=[class_name])
+                HuggingFaceEmbeddings = getattr(module, class_name)
+                break
+            except (ImportError, AttributeError):
+                continue
+        
+        if HuggingFaceEmbeddings is None:
+            raise ImportError(
+                "HuggingFace embeddings are not installed. Install: pip install sentence-transformers langchain-huggingface"
+            )
         
         if not model_name:
             raise ValueError("model_name is required for HuggingFace embeddings")
@@ -72,14 +79,23 @@ class HuggingFaceProvider(BaseEmbeddingProvider):
 
 class OpenAIProvider(BaseEmbeddingProvider):
     def create(self, model_name: Optional[str], **kwargs) -> Any:
-        try:
-            # try common package paths
+        # Try multiple import paths for OpenAI embeddings
+        OpenAIEmbeddings = None
+        import_paths = [
+            ("langchain_openai", "OpenAIEmbeddings"),
+            ("langchain.embeddings", "OpenAIEmbeddings"),
+        ]
+        
+        for module_path, class_name in import_paths:
             try:
-                from langchain_openai import OpenAIEmbeddings  # type: ignore
-            except Exception:
-                from langchain.embeddings import OpenAIEmbeddings  # type: ignore
-        except Exception as e:
-            raise ImportError("OpenAI embeddings are not installed. Install: pip install langchain-openai") from e
+                module = __import__(module_path, fromlist=[class_name])
+                OpenAIEmbeddings = getattr(module, class_name)
+                break
+            except (ImportError, AttributeError):
+                continue
+        
+        if OpenAIEmbeddings is None:
+            raise ImportError("OpenAI embeddings are not installed. Install: pip install langchain-openai")
 
         if not model_name:
             raise ValueError("model_name is required for OpenAI embeddings")

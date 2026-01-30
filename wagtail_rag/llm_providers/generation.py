@@ -149,6 +149,63 @@ Answer:""",
         context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
         return self.prompt_template_str.format(context=context, question=question)
 
+    @staticmethod
+    def _extract_text_from_result(result: Any) -> str:
+        """Extract text content from various LLM response formats."""
+        if hasattr(result, 'content'):
+            return str(result.content)
+        if isinstance(result, str):
+            return result
+        return str(result)
+
+    def _invoke_chat_model(self, prompt_text: str) -> str:
+        """Invoke a chat model (ChatOllama, ChatOpenAI, etc.) with messages."""
+        # Try with HumanMessage wrapper first
+        if HUMAN_MESSAGE_AVAILABLE and HumanMessage:
+            try:
+                message = HumanMessage(content=prompt_text)
+                result = self.llm.invoke([message])
+                return self._extract_text_from_result(result)
+            except Exception as e:
+                logger.debug("HumanMessage invoke failed: %s", e)
+        
+        # Try direct string invoke
+        try:
+            result = self.llm.invoke(prompt_text)
+            return self._extract_text_from_result(result)
+        except Exception as e:
+            logger.debug("Direct string invoke failed: %s", e)
+        
+        # Try dict format as last resort
+        try:
+            result = self.llm.invoke({"role": "user", "content": prompt_text})
+            return self._extract_text_from_result(result)
+        except Exception:
+            logger.exception("All chat model invocation methods failed")
+            raise
+
+    def _invoke_regular_llm(self, prompt_text: str) -> str:
+        """Invoke a regular LLM (non-chat) with various methods."""
+        # Try direct call
+        try:
+            return str(self.llm(prompt_text))
+        except (TypeError, AttributeError) as e:
+            logger.debug("Direct call failed: %s", e)
+        
+        # Try invoke method
+        try:
+            result = self.llm.invoke(prompt_text)
+            return self._extract_text_from_result(result)
+        except Exception as e:
+            logger.debug("Invoke method failed: %s", e)
+        
+        # Try generate method (legacy LangChain)
+        try:
+            return str(self.llm.generate([prompt_text]).generations[0][0].text)
+        except Exception:
+            logger.exception("All regular LLM invocation methods failed")
+            raise
+
     def generate_answer_with_llm(self, question: str, docs: List[Any]) -> str:
         """Generate an answer by formatting a prompt and calling the raw LLM callable.
 
@@ -157,63 +214,17 @@ Answer:""",
         """
         prompt_text = self._format_simple_prompt(question, docs)
         
-        # Check if this is a chat model (expects messages, not plain strings)
+        # Detect if this is a chat model (expects messages, not plain strings)
         is_chat_model = (
-            hasattr(self.llm, '__class__') and 
-            'Chat' in self.llm.__class__.__name__
+            hasattr(self.llm, '__class__') and 'Chat' in self.llm.__class__.__name__
         ) or (
-            hasattr(self.llm, 'invoke') and 
-            not hasattr(self.llm, 'generate')
+            hasattr(self.llm, 'invoke') and not hasattr(self.llm, 'generate')
         )
         
         if is_chat_model:
-            # Chat models need messages, not plain strings
-            try:
-                if HUMAN_MESSAGE_AVAILABLE and HumanMessage:
-                    message = HumanMessage(content=prompt_text)
-                    result = self.llm.invoke([message])
-                else:
-                    # Fallback: try with string or dict format
-                    result = self.llm.invoke(prompt_text)
-                
-                # Extract text from response (could be AIMessage or string)
-                if hasattr(result, 'content'):
-                    return result.content
-                elif isinstance(result, str):
-                    return result
-                else:
-                    return str(result)
-            except Exception:
-                # Fallback: try dict format or direct string
-                try:
-                    result = self.llm.invoke({"role": "user", "content": prompt_text})
-                    if hasattr(result, 'content'):
-                        return result.content
-                    return str(result)
-                except Exception:
-                    logger.exception("Chat model invocation failed")
-                    raise
+            return self._invoke_chat_model(prompt_text)
         else:
-            # Regular LLM - try different invocation methods
-            try:
-                # Try direct call (for callable LLMs)
-                return self.llm(prompt_text)
-            except TypeError:
-                # Try invoke method
-                try:
-                    result = self.llm.invoke(prompt_text)
-                    if isinstance(result, str):
-                        return result
-                    if hasattr(result, 'content'):
-                        return result.content
-                    return str(result)
-                except Exception:
-                    # Try generate method (legacy LangChain)
-                    try:
-                        return self.llm.generate([prompt_text]).generations[0][0].text
-                    except Exception:
-                        logger.exception("LLM call failed for simple prompt")
-                        raise
+            return self._invoke_regular_llm(prompt_text)
 
     def generate_answer(self, question: str, docs: Optional[List[Any]] = None) -> str:
         """Main entry point for generating an answer.
@@ -227,7 +238,7 @@ Answer:""",
         # If docs are provided, use them directly - don't let the chain re-retrieve
         # This ensures we use the documents from our hybrid search (vector + Wagtail)
         if docs:
-            logger.info(f"Using {len(docs)} pre-retrieved documents for LLM context (bypassing chain retriever)")
+            logger.debug(f"Using {len(docs)} pre-retrieved documents for LLM context")
             return self.generate_answer_with_llm(question, docs)
 
         # Fallback mode: no chain
@@ -243,28 +254,27 @@ Answer:""",
                 logger.exception("LCEL chain invocation failed")
                 raise
 
-            # Normalize output to a string when possible
+            # Normalize output to a string
             if isinstance(out, str):
                 return out
+            
             if isinstance(out, dict):
-                # Common keys that may hold textual output
+                # Try common output keys
                 for key in ("output", "text", "result", "answer"):
                     if key in out and isinstance(out[key], str):
                         return out[key]
-                # Sometimes 'output' is a list or object
-                val = out.get("output") or out.get("result") or out.get("answer")
-                if isinstance(val, str):
-                    return val
-                # Best-effort stringify
-                return str(out)
+            
+            # Try object attributes
+            for attr in ("text", "output", "content"):
+                if hasattr(out, attr):
+                    val = getattr(out, attr)
+                    if isinstance(val, str):
+                        return val
+            
             if out is None:
-                raise RuntimeError("LCEL chain failed to produce an output")
-
-            # If the chain returned an object with text-like attributes
-            if hasattr(out, "text"):
-                return str(getattr(out, "text"))
-            if hasattr(out, "output"):
-                return str(getattr(out, "output"))
+                raise RuntimeError("LCEL chain produced no output")
+            
+            # Last resort: stringify
             return str(out)
 
         # Legacy RetrievalQA
