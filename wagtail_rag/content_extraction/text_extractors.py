@@ -307,5 +307,3 @@ def strip_html_tags_and_normalize_text(text: str) -> str:
 # wagtail_page_to_documents has been moved to page_to_documents.py
 # This function is now available via: from wagtail_rag.content_extraction.page_to_documents import wagtail_page_to_documents
 
-
-
