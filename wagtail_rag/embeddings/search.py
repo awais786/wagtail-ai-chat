@@ -73,9 +73,10 @@ class EmbeddingSearcher:
             from bs4 import BeautifulSoup  # type: ignore
 
             return BeautifulSoup(text, "html.parser").get_text(separator=" ", strip=True)
-        except Exception:
+        except Exception as e:
             import re
 
+            logger.debug("BeautifulSoup unavailable, stripping HTML with regex: %s", e)
             return " ".join(re.sub(r"<[^>]+>", " ", text).split())
 
     @staticmethod
@@ -113,15 +114,15 @@ class EmbeddingSearcher:
 
         # Try modern retriever API first (supports MultiQueryRetriever)
         try:
-            logger.debug(f"Using retriever.invoke() (may use MultiQueryRetriever with LLM query expansion)")
+            logger.debug("Using retriever.invoke() (may use MultiQueryRetriever with LLM query expansion)")
             docs = self.retriever.invoke(query)
-        except Exception:
-            # Fallback to direct vectorstore search
+        except Exception as e:
+            logger.debug("retriever.invoke failed, falling back to vectorstore: %s", e)
             try:
-                logger.debug(f"Fallback: Using direct vectorstore.similarity_search()")
+                logger.debug("Fallback: Using direct vectorstore.similarity_search()")
                 docs = self.vectorstore.similarity_search(query, k=self.k_value)
-            except Exception:
-                logger.error(f"Vector search failed, returning empty results")
+            except Exception as e2:
+                logger.error("Vector search failed, returning empty results: %s", e2)
                 docs = []
 
         # Track URLs and IDs for deduplication (used when combining with Wagtail results)
@@ -143,7 +144,8 @@ class EmbeddingSearcher:
             from wagtail.models import Page  # type: ignore
 
             return Page
-        except Exception:
+        except Exception as e:
+            logger.debug("Wagtail Page model not available: %s", e)
             return None
 
     def _get_page_to_documents_function(self) -> Optional[Callable]:
@@ -151,7 +153,8 @@ class EmbeddingSearcher:
         try:
             from wagtail_rag.content_extraction import wagtail_page_to_documents
             return wagtail_page_to_documents
-        except Exception:
+        except Exception as e:
+            logger.debug("wagtail_page_to_documents not available: %s", e)
             return None
 
     def _convert_wagtail_page_to_documents(self, page: Any) -> List[Document]:
@@ -189,7 +192,8 @@ class EmbeddingSearcher:
                         },
                     )
                 ]
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to convert Wagtail page to documents: %s", e)
             return []
 
     def _normalize_query_for_wagtail(self, query: str) -> str:
@@ -339,8 +343,8 @@ class EmbeddingSearcher:
                 existing_ids = {id(d) for d in title_docs}
                 other_docs = [d for d in docs if id(d) not in existing_ids]
                 return title_docs + other_docs[: self.k_value - len(title_docs)]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Title boost for short query failed: %s", e)
 
         return docs
 
@@ -498,7 +502,13 @@ class EmbeddingSearcher:
         return results
 
     def search_with_embeddings(self, query: str, k: Optional[int] = None, metadata_filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """Search for similar content using vectorstore similarity search and return cleaned results."""
+        """
+        Lower-level search: vector similarity only, with score and optional metadata filter.
+
+        This is an internal utility for callers that need raw scored results and filtering.
+        For normal RAG retrieval (including hybrid search and title boosting), use
+        retrieve_with_embeddings() instead.
+        """
         if k is None:
             k = getattr(settings, "WAGTAIL_RAG_SEARCH_K", 10)
 

@@ -6,10 +6,12 @@ with intelligent chunking and metadata. It creates separate documents for title/
 and chunks body content with title context for better semantic separation and retrieval.
 """
 
+import logging
 from typing import List, Optional, Callable, TYPE_CHECKING
-import html
-import re
+
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from wagtail.models import Page  # type: ignore
@@ -28,16 +30,17 @@ except ImportError:
 def get_page_url(page: Page) -> str:
     """
     Get page URL safely, handling cases where it might not be available.
-    
+
     Args:
         page: Wagtail Page instance
-        
+
     Returns:
         Page URL or empty string if not available
     """
     try:
         return page.get_full_url() or page.url_path or ""
-    except (AttributeError, RuntimeError, Exception):
+    except (AttributeError, RuntimeError) as e:
+        logger.debug("get_page_url failed for page %s: %s", getattr(page, "pk", None), e)
         return ""
 
 
@@ -160,11 +163,12 @@ def _chunk_streamfield(page: Page, base_metadata: dict, chunk_size: int, chunk_o
             
             for chunk_idx, chunk in enumerate(chunks):
                 # Include title for context (improves semantic understanding)
-                page_id = body_item['metadata'].get('page_id', 'unknown')
-                section = body_item['metadata'].get('section', 'body')
+                page_id = body_item["metadata"].get("page_id", "unknown")
+                section = body_item["metadata"].get("section", "body")
                 chunk_doc_id = f"{page_id}_{section}_{chunk_idx}"
+                title = (page.title or "").strip() or "(no title)"
                 chunk_doc = Document(
-                    page_content=f"Title: {page.title}\n\n{chunk}",
+                    page_content=f"Title: {title}\n\n{chunk}",
                     metadata={**body_item["metadata"], "chunk_index": chunk_idx, "doc_id": chunk_doc_id},
                 )
                 documents.append(chunk_doc)
@@ -203,19 +207,20 @@ def wagtail_page_to_documents(
     """
     # Get chunk size/overlap from settings if using defaults
     if chunk_size == 500:
-        chunk_size = getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 500)
+        chunk_size = getattr(settings, "WAGTAIL_RAG_CHUNK_SIZE", 500)
     if chunk_overlap == 75:
-        chunk_overlap = getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 75)
-    
-    # Get specific page type
+        chunk_overlap = getattr(settings, "WAGTAIL_RAG_CHUNK_OVERLAP", 75)
+
+    # Resolve to the concrete page type (e.g. BreadPage) so we can access its fields
     page = page.specific
     documents = []
 
+    page_title = page.title if page.title is not None else ""
     base_meta = {
         "page_id": page.id,
         "page_type": page.__class__.__name__,
         "slug": getattr(page, "slug", ""),
-        "title": page.title,
+        "title": page_title,
         "url": get_page_url(page),
     }
     
@@ -231,7 +236,7 @@ def wagtail_page_to_documents(
     # Title
     title_doc_id = f"{base_meta['page_id']}_title_0"
     title_doc = Document(
-        page_content=f"Title: {page.title}",
+        page_content=f"Title: {page_title or '(no title)'}",
         metadata={**base_meta, "section": "title", "chunk_index": 0, "doc_id": title_doc_id},
     )
     documents.append(title_doc)

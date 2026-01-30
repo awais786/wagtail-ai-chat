@@ -173,8 +173,8 @@ class RAGChatBot:
                         embeddings=self.embeddings,
                         allow_dangerous_deserialization=True,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Could not load existing FAISS index, creating new one: %s", e)
             
             # Create new FAISS index if it doesn't exist
             test_embedding = self.embeddings.embed_query("test")
