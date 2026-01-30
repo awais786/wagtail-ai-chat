@@ -1,8 +1,9 @@
 """
-RAG index building logic.
+RAG index building and management.
 
 This module provides the main entry point for building the RAG index,
 orchestrating page selection, document extraction, and vector store operations.
+It handles both ChromaDB and FAISS backends for storing embeddings.
 """
 
 import os
@@ -10,7 +11,7 @@ from typing import Optional, Iterable, Callable, List
 from django.conf import settings
 from django.apps import apps
 from wagtail.models import Page
-from .extractors import wagtail_page_to_documents
+from .page_to_documents import wagtail_page_to_documents
 
 try:
     from langchain_core.documents import Document

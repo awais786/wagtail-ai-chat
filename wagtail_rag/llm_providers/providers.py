@@ -14,8 +14,9 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 # Provider-specific default models
+# Note: For Ollama, make sure the model is installed: ollama pull <model_name>
 PROVIDER_DEFAULTS: Dict[str, Optional[str]] = {
-    "ollama": "mistral",
+    "ollama": None,  # No default - user must specify model or set WAGTAIL_RAG_MODEL_NAME
     "openai": "gpt-4",
     "anthropic": "claude-3-sonnet-20240229",
     "claude": "claude-3-sonnet-20240229",
@@ -51,9 +52,17 @@ class BaseLLMProvider:
 
 class OllamaProvider(BaseLLMProvider):
     def create(self, model_name: Optional[str], **kwargs) -> Any:
-        """Create Ollama LLM instance, preferring ChatOllama over legacy Ollama."""
+        """Create Ollama LLM instance, preferring ChatOllama over legacy Ollama.
+        
+        Args:
+            model_name: Model name (e.g., 'mistral', 'llama2', 'phi'). 
+                       Must be installed in Ollama: ollama pull <model_name>
+        """
         if not model_name:
-            raise ValueError("model_name is required for Ollama provider")
+            raise ValueError(
+                "model_name is required for Ollama provider. "
+                "Set WAGTAIL_RAG_MODEL_NAME in settings or install a model: ollama pull <model_name>"
+            )
         
         try:
             # Modern LangChain standard
@@ -68,6 +77,16 @@ class OllamaProvider(BaseLLMProvider):
                 raise ImportError(
                     "Ollama not found. Run: pip install langchain-community ollama"
                 ) from e
+        except Exception as e:
+            # Catch model not found errors and provide helpful message
+            error_msg = str(e).lower()
+            if "model" in error_msg and ("not found" in error_msg or "does not exist" in error_msg):
+                raise ValueError(
+                    f"Ollama model '{model_name}' not found. "
+                    f"Install it with: ollama pull {model_name}\n"
+                    f"Or set WAGTAIL_RAG_MODEL_NAME to a different model in your settings."
+                ) from e
+            raise
 
 
 class OpenAIProvider(BaseLLMProvider):

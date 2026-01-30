@@ -2,32 +2,44 @@
 Content Extraction and Indexing modules for Wagtail RAG.
 
 This package contains:
-- content_extraction: Utility functions for extracting text from Wagtail pages
-- indexing: Core indexing logic for building the RAG index
+- text_extractors: Utility functions for extracting text from Wagtail pages
+- page_to_documents: Converts Wagtail pages to LangChain Document objects with chunking
+- index_builder: Core indexing logic for building the RAG index
 """
 
-# Export content extraction utility functions
-from .content_extraction import (
-    extract_page_content,
+# Export text extraction utility functions
+from .text_extractors import (
+    extract_all_page_content_as_text,
     get_page_url,
-    extract_streamfield_text,
-    clean_html,
+    extract_text_from_streamfield,
+    strip_html_tags_and_normalize_text,
 )
 
-# Export document extraction (moved to extractors.py)
-from .extractors import wagtail_page_to_documents
+# Backward compatibility aliases
+extract_page_content = extract_all_page_content_as_text
+extract_streamfield_text = extract_text_from_streamfield
+clean_html = strip_html_tags_and_normalize_text
 
-# Export indexing function
-from .indexer import build_rag_index
+# Export document conversion (converts pages to LangChain documents)
+from .page_to_documents import wagtail_page_to_documents
 
-# Export components from indexer
-from .indexer import get_page_models, get_live_pages, ChromaStore
+# Export index building function
+from .index_builder import build_rag_index
+
+# Export components from index builder
+from .index_builder import get_page_models, get_live_pages, ChromaStore
 
 __all__ = [
-    'extract_page_content',
+    # New clear function names
+    'extract_all_page_content_as_text',
+    'extract_text_from_streamfield',
+    'strip_html_tags_and_normalize_text',
+    # Backward compatibility aliases
+    'extract_page_content',  # Alias for extract_all_page_content_as_text
+    'extract_streamfield_text',  # Alias for extract_text_from_streamfield
+    'clean_html',  # Alias for strip_html_tags_and_normalize_text
+    # Other exports
     'get_page_url',
-    'extract_streamfield_text',
-    'clean_html',
     'wagtail_page_to_documents',
     'build_rag_index',
     # New modular components

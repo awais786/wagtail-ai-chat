@@ -71,8 +71,7 @@ class LLMGenerator:
         return getattr(
             settings,
             "WAGTAIL_RAG_PROMPT_TEMPLATE",
-            """You are a helpful assistant for a bakery website.
-Use ONLY the following context from the site to answer the question.
+            """You are a helpful assistant. Use ONLY the following context to answer the question.
 If the context does not mention some detail, simply do not talk about that detail.
 Do not say things like "the context does not contain" or explain what is missing.
 
@@ -269,24 +268,22 @@ Answer:""",
             return str(out)
 
         # Legacy RetrievalQA
+        # Note: docs check is redundant here since it's already handled above, but kept for safety
         try:
-            if docs:
-                # Legacy chains usually expect only a query and perform retrieval internally, so use fallback
-                return self.generate_answer_with_llm(question, docs)
-
             result = self.qa_chain({"query": question})
             if isinstance(result, dict):
                 return result.get("result") or result.get("answer") or ""
             # Best-effort stringify
             return str(result)
         except Exception:
-            logger.exception("QA chain invocation failed; falling back to raw LLM with docs if available")
-            if docs:
-                return self.generate_answer_with_llm(question, docs)
+            logger.exception("QA chain invocation failed")
             raise
 
     def get_source_documents_from_chain(self, question: str) -> List[Any]:
         """Attempt to extract source documents returned by the chain (legacy RetrievalQA path).
+
+        Note: This method is currently unused but kept for potential future use.
+        The RAG chatbot uses pre-retrieved documents from hybrid search instead.
 
         Returns a list (possibly empty) of source Document objects.
         """

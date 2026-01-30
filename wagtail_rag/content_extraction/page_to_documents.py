@@ -1,8 +1,9 @@
 """
-Document extraction from Wagtail pages.
+Convert Wagtail pages to LangChain Document objects.
 
 This module handles converting Wagtail Page objects into LangChain Document objects
-with intelligent chunking and metadata.
+with intelligent chunking and metadata. It creates separate documents for title/intro
+and chunks body content with title context for better semantic separation and retrieval.
 """
 
 from typing import List, Optional, Callable
@@ -14,8 +15,8 @@ try:
 except ImportError:
     from langchain.schema import Document
 
-from wagtail_rag.content_extraction.content_extraction import (
-    extract_streamfield_text,
+from wagtail_rag.content_extraction.text_extractors import (
+    extract_text_from_streamfield,
     get_page_url,
 )
 
@@ -39,7 +40,7 @@ def _chunk_streamfield(page: Page, base_metadata: dict, chunk_size: int, chunk_o
             if field_value:
                 if stdout:
                     stdout(f"  Found field '{field_name}', extracting text...")
-                streamfield_text = extract_streamfield_text(field_value)
+                streamfield_text = extract_text_from_streamfield(field_value)
                 if streamfield_text and streamfield_text.strip():
                     body_texts.append({
                         "text": streamfield_text,

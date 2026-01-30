@@ -1,15 +1,32 @@
 """
-Utility functions for content extraction and processing.
+Text extraction utilities for Wagtail pages.
 
-This module provides utilities for extracting text content from Wagtail Page models,
-handling StreamFields, RichTextFields, and other common Wagtail field types.
+This module provides utility functions for extracting plain text content from Wagtail Page models,
+handling various field types including StreamFields, RichTextFields, and other common Wagtail fields.
+
+Main Functions:
+- get_page_url(): Safely get the URL of a Wagtail page
+- extract_all_page_content_as_text(): Extract all text content from a page (title, fields, streamfields, richtext, tags, authors, etc.)
+- extract_text_from_streamfield(): Extract text from a Wagtail StreamField block
+- strip_html_tags_and_normalize_text(): Remove HTML tags, decode entities, and normalize whitespace
+
+Helper Functions (internal):
+- _convert_field_value_to_string(): Convert various Wagtail field types to plain strings
+- _extract_all_strings_from_dict_recursively(): Recursively extract all strings from nested dictionaries
 """
 
 import html
 import re
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
-from wagtail.models import Page
+if TYPE_CHECKING:
+    from wagtail.models import Page  # type: ignore
+else:
+    try:
+        from wagtail.models import Page  # type: ignore
+    except ImportError:
+        # Fallback for environments without Wagtail
+        Page = None  # type: ignore
 
 
 def get_page_url(page: Page) -> str:
@@ -24,19 +41,25 @@ def get_page_url(page: Page) -> str:
     """
     try:
         return page.get_full_url() or page.url_path or ""
-    except Exception:
+    except (AttributeError, RuntimeError, Exception):
         return ""
 
 
-def _get_field_value(value):
+def _convert_field_value_to_string(value):
     """
-    Extract string representation from various field types.
+    Convert various Wagtail field types to a plain string representation.
+    
+    Handles:
+    - Plain strings (returns as-is)
+    - ManyToMany querysets (joins item names/titles)
+    - Related objects with 'title' or 'name' attributes
+    - Any other type (converts to string)
 
     Args:
-        value: Field value (can be related object, string, or queryset)
+        value: Field value (can be related object, string, queryset, or any type)
 
     Returns:
-        String representation or None
+        String representation or None if value is empty/None
     """
     if not value:
         return None
@@ -68,19 +91,30 @@ def _get_field_value(value):
     return str(value)
 
 
-def extract_page_content(page: Page, important_fields=None) -> Optional[str]:
+def extract_all_page_content_as_text(page: Page, important_fields=None) -> Optional[str]:
     """
-    Extract comprehensive text content from a Wagtail page.
+    Extract all text content from a Wagtail page into a single formatted text string.
+    
+    Extracts and combines:
+    - Page title
+    - Important/custom fields (if specified)
+    - Common fields (subtitle, introduction, description, summary, dates, search_description)
+    - StreamField content (body, content, backstory, instructions)
+    - RichTextField content (all RichText fields found on the page)
+    - Tags (if available)
+    - Authors (if available)
+    - Address, coordinates, operating hours (if available)
     
     This matches the extraction logic used during indexing in build_rag_index.py
     to ensure consistency between indexed content and search-time extraction.
 
     Args:
         page: Wagtail Page instance
-        important_fields: Optional list of field names to emphasize (e.g., ['bread_type', 'origin'])
+        important_fields: Optional list of field names to extract first/emphasize 
+                         (e.g., ['bread_type', 'origin'])
 
     Returns:
-        Extracted text content or None
+        Formatted text string with all extracted content, or None if no content found
     """
     # Start with title
     text_parts = [f"Title: {page.title}"]
@@ -96,7 +130,7 @@ def extract_page_content(page: Page, important_fields=None) -> Optional[str]:
 
             if hasattr(page, field_name):
                 value = getattr(page, field_name, None)
-                field_value = _get_field_value(value)
+                field_value = _convert_field_value_to_string(value)
 
                 if field_value:
                     label = field_name.replace('_', ' ').title()
@@ -125,7 +159,7 @@ def extract_page_content(page: Page, important_fields=None) -> Optional[str]:
         if hasattr(page, field_name):
             field_value = getattr(page, field_name, None)
             if field_value:
-                streamfield_text = extract_streamfield_text(field_value)
+                streamfield_text = extract_text_from_streamfield(field_value)
                 if streamfield_text:
                     label = field_name.replace('_', ' ').title()
                     text_parts.append(f"{label}:\n{streamfield_text}")
@@ -140,7 +174,7 @@ def extract_page_content(page: Page, important_fields=None) -> Optional[str]:
                     if value:
                         if hasattr(value, 'source'):
                             # Strip HTML tags for better embeddings
-                            rich_text = clean_html(value.source)
+                            rich_text = strip_html_tags_and_normalize_text(value.source)
                             if rich_text:
                                 text_parts.append(f"{field.name.title()}: {rich_text}")
                         else:
@@ -188,11 +222,22 @@ def extract_page_content(page: Page, important_fields=None) -> Optional[str]:
     return text.strip() if text.strip() else None
 
 
-def extract_streamfield_text(streamfield) -> str:
+def extract_text_from_streamfield(streamfield) -> str:
     """
-    Extract text from a StreamField.
+    Extract all text content from a Wagtail StreamField block.
+    
+    Processes each block in the StreamField:
+    - String blocks: added directly
+    - Blocks with 'value' attribute: extracts string values or recursively processes dict values
+    - Dict blocks: recursively extracts all string values from nested dictionaries
     
     This matches the extraction logic used during indexing in build_rag_index.py.
+    
+    Args:
+        streamfield: Wagtail StreamField instance or iterable of blocks
+        
+    Returns:
+        Single string containing all extracted text, space-separated
     """
     if not streamfield:
         return ""
@@ -205,26 +250,51 @@ def extract_streamfield_text(streamfield) -> str:
                 text_parts.append(value)
             elif isinstance(value, dict):
                 # Extract text from dict values recursively
-                text_parts.extend(_extract_dict_strings(value))
+                text_parts.extend(_extract_all_strings_from_dict_recursively(value))
         elif isinstance(block, str):
             text_parts.append(block)
 
     return " ".join(text_parts)
 
 
-def _extract_dict_strings(data):
-    """Recursively extract strings from a dictionary."""
+def _extract_all_strings_from_dict_recursively(data):
+    """
+    Recursively extract all string values from a nested dictionary.
+    
+    Traverses the dictionary structure and collects all string values,
+    handling nested dictionaries by recursively processing them.
+    
+    Args:
+        data: Dictionary (may contain nested dictionaries)
+        
+    Returns:
+        List of all string values found in the dictionary structure
+    """
     strings = []
     for value in data.values():
         if isinstance(value, str):
             strings.append(value)
         elif isinstance(value, dict):
-            strings.extend(_extract_dict_strings(value))
+            strings.extend(_extract_all_strings_from_dict_recursively(value))
     return strings
 
 
-def clean_html(text: str) -> str:
-    """Remove HTML tags and decode entities."""
+def strip_html_tags_and_normalize_text(text: str) -> str:
+    """
+    Remove HTML tags, decode HTML entities, and normalize whitespace in text.
+    
+    Processing steps:
+    1. Remove all HTML tags using regex
+    2. Decode HTML entities (e.g., &amp; -> &, &lt; -> <)
+    3. Normalize multiple whitespace characters to single spaces
+    4. Strip leading/trailing whitespace
+    
+    Args:
+        text: String that may contain HTML tags and entities
+        
+    Returns:
+        Clean plain text with no HTML tags, decoded entities, and normalized whitespace
+    """
     # Remove HTML tags
     text = re.sub(r"<[^>]+>", " ", text)
     # Decode HTML entities
@@ -234,8 +304,8 @@ def clean_html(text: str) -> str:
     return text.strip()
 
 
-# wagtail_page_to_documents has been moved to extractors.py
-# This function is now available via: from wagtail_rag.content_extraction.extractors import wagtail_page_to_documents
+# wagtail_page_to_documents has been moved to page_to_documents.py
+# This function is now available via: from wagtail_rag.content_extraction.page_to_documents import wagtail_page_to_documents
 
 
 

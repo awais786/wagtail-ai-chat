@@ -121,7 +121,7 @@ class EmbeddingSearcher:
                 logger.debug(f"Fallback: Using direct vectorstore.similarity_search()")
                 docs = self.vectorstore.similarity_search(query, k=self.k_value)
             except Exception:
-                logger.warning(f"Error: Vector search failed, returning empty results")
+                logger.error(f"Vector search failed, returning empty results")
                 docs = []
 
         # Track URLs and IDs for deduplication (used when combining with Wagtail results)
@@ -150,19 +150,19 @@ class EmbeddingSearcher:
         """Lazy import content extraction utilities from wagtail_rag.content_extraction."""
         try:
             from wagtail_rag.content_extraction import (
-                extract_page_content,
+                extract_all_page_content_as_text,
                 get_page_url,
-                extract_streamfield_text,
+                extract_text_from_streamfield,
             )
 
-            return extract_page_content, get_page_url, extract_streamfield_text
+            return extract_all_page_content_as_text, get_page_url, extract_text_from_streamfield
         except Exception:
             return None, None, None
 
     def _convert_wagtail_page_to_document(self, page: Any) -> Optional[Document]:
         """Convert a Wagtail Page object into a lightweight Document instance."""
         try:
-            extract_page_content, get_page_url_util, extract_streamfield_text = self._get_content_extraction_utils()
+            extract_all_page_content_as_text, get_page_url_util, extract_text_from_streamfield = self._get_content_extraction_utils()
 
             page_url = getattr(page, "url", "")
             if get_page_url_util:
@@ -170,8 +170,8 @@ class EmbeddingSearcher:
 
             # Extract page content using extraction utilities when available
             page_text = None
-            if extract_page_content:
-                page_text = extract_page_content(page)
+            if extract_all_page_content_as_text:
+                page_text = extract_all_page_content_as_text(page)
             else:
                 parts: List[str] = []
                 title = getattr(page, "title", "")
@@ -184,8 +184,8 @@ class EmbeddingSearcher:
 
                 body = getattr(page, "body", None)
                 if body:
-                    if extract_streamfield_text:
-                        streamfield_text = extract_streamfield_text(body)
+                    if extract_text_from_streamfield:
+                        streamfield_text = extract_text_from_streamfield(body)
                         if streamfield_text:
                             parts.append(streamfield_text[:500])
                     else:
@@ -412,16 +412,16 @@ class EmbeddingSearcher:
             List of Document objects ranked by relevance
         """
         # Step 1: Always perform vector search (primary search method)
-        logger.warning(f"STEP 1: Vector Search - Starting vector search for query: '{query}'")
+        logger.info(f"Starting vector search for query: '{query}'")
         vector_docs, seen_urls, seen_ids = self._get_vector_docs(query)
-        logger.warning(f"STEP 1: Vector Search - Found {len(vector_docs)} documents for query: '{query}'")
+        logger.info(f"Vector search found {len(vector_docs)} documents for query: '{query}'")
         
         # Step 2: Optionally add Wagtail search results (only if hybrid search is enabled)
         wagtail_docs = []
         if self.use_hybrid_search:
-            logger.warning(f"STEP 2: Hybrid Search (Wagtail) - Starting Wagtail search for query: '{query}'")
+            logger.info(f"Starting Wagtail search for query: '{query}'")
             wagtail_docs = self._get_wagtail_docs(query, seen_urls, seen_ids)
-            logger.warning(f"STEP 2: Hybrid Search (Wagtail) - Found {len(wagtail_docs)} additional documents (after deduplication) for query: '{query}'")
+            logger.info(f"Wagtail search found {len(wagtail_docs)} additional documents (after deduplication) for query: '{query}'")
             
             # Warn if Wagtail search didn't add any new results
             if len(wagtail_docs) == 0 and len(vector_docs) > 0:
@@ -440,7 +440,7 @@ class EmbeddingSearcher:
                     f"  3. Verifying the query matches your content"
                 )
         else:
-            logger.warning(f"STEP 2: Hybrid Search (Wagtail) - Skipped (hybrid search disabled)")
+            logger.debug(f"Hybrid search (Wagtail) skipped (hybrid search disabled)")
         # If use_hybrid_search is False, wagtail_docs will be empty list
 
         # Step 3: Combine results (vector search + optional Wagtail search)
