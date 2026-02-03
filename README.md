@@ -1,5 +1,7 @@
 # Wagtail RAG Chatbot
 
+> **Security Notice (Jan 2026)**: This version includes critical security updates for LangChain dependencies. Please upgrade to the latest version or ensure you have `langchain-community>=0.3.27` and `langchain-text-splitters>=0.3.9` installed. See [SECURITY.md](SECURITY.md) for details.
+
 A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. This Django app provides a complete RAG solution that indexes your Wagtail pages into FAISS or ChromaDB and provides a chatbot interface using LangChain with support for multiple LLM and embedding providers.
 
 ## Features
@@ -216,9 +218,30 @@ WAGTAIL_RAG_USE_HYBRID_SEARCH = True
 ```python
 # Max POST body size in bytes for the chat API (default: 1MB). Helps prevent DoS from huge payloads.
 WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE = 1024 * 1024
+
+# Max question length (default: 1000 characters). Helps prevent abuse.
+WAGTAIL_RAG_MAX_QUESTION_LENGTH = 1000
 ```
 
-The chat endpoint (`/api/rag/chat/`) is CSRF-exempt so it can be called by external clients, scripts, or non-Django frontends. If the endpoint is public, protect it at the network or gateway level (e.g. authentication, rate limiting, or IP allowlisting).
+**Security Considerations**:
+
+The chat endpoint (`/api/rag/chat/`) is CSRF-exempt so it can be called by external clients, scripts, or non-Django frontends. If the endpoint is public, you **must** protect it:
+
+1. **Authentication**: Add authentication middleware or decorator
+2. **Rate Limiting**: Use django-ratelimit or similar
+3. **IP Allowlisting**: Restrict to known IP addresses
+4. **Network Security**: Use firewall rules, reverse proxy authentication
+
+Example with django-ratelimit:
+```python
+from django_ratelimit.decorators import ratelimit
+
+@ratelimit(key='ip', rate='10/m', method='POST')
+def rag_chat_api(request):
+    # ... existing code
+```
+
+**See SECURITY.md for complete security guidelines.**
 
 ### Model Indexing Configuration
 
