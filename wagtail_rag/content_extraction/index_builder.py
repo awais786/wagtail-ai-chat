@@ -318,8 +318,14 @@ class ChromaStore:
         try:
             if self.backend == "chroma":
                 try:
+                    # Prefer using a filtered query when possible to avoid scanning the entire index.
                     data = self.db.get(where={"source": source}) if source else self.db.get()
                 except Exception:
+                    # Fallback: some ChromaDB backends/versions may not support `where` filters
+                    # for this metadata field or may raise unexpectedly. In that case, we fall
+                    # back to fetching all documents and filtering in Python so that index
+                    # cleanup still works. This can be inefficient for very large indexes but
+                    # is an intentional robustness trade-off to ensure stale pages are removed.
                     data = self.db.get()
                 if not data or not data.get("ids"):
                     return 0
