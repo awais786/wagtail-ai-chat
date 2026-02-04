@@ -269,6 +269,108 @@ class ChromaStore:
             import logging
             logging.getLogger(__name__).warning(f"Error deleting page {page_id}: {e}")
 
+    def page_is_current(self, page_id: int, last_published_at: Optional[str] = None) -> bool:
+        """
+        Return True if the page already exists in the index and (optionally) matches last_published_at.
+        """
+        try:
+            if self.backend == "chroma":
+                try:
+                    data = self.db.get(where={"page_id": page_id})
+                except Exception:
+                    data = self.db.get()
+                metadatas = data.get("metadatas", []) if data else []
+                for meta in metadatas:
+                    if meta.get("page_id") != page_id:
+                        continue
+                    if last_published_at is None:
+                        return True
+                    if meta.get("last_published_at") == last_published_at:
+                        return True
+                return False
+            
+            if self.backend == "faiss":
+                if not (hasattr(self.db, 'index_to_docstore_id') and hasattr(self.db, 'docstore')):
+                    return False
+                for doc_id in list(self.db.index_to_docstore_id.values()):
+                    try:
+                        doc = self.db.docstore.search(doc_id)
+                        if not isinstance(doc, Document):
+                            continue
+                        if doc.metadata.get("page_id") != page_id:
+                            continue
+                        if last_published_at is None:
+                            return True
+                        if doc.metadata.get("last_published_at") == last_published_at:
+                            return True
+                    except (KeyError, AttributeError):
+                        continue
+                return False
+        except Exception:
+            return False
+
+    def delete_pages_not_in(self, live_ids: set[int], source: Optional[str] = None) -> int:
+        """
+        Delete all indexed pages not in live_ids (optionally scoped to a model source).
+        Returns number of docs deleted (best-effort).
+        """
+        deleted = 0
+        try:
+            if self.backend == "chroma":
+                try:
+                    data = self.db.get(where={"source": source}) if source else self.db.get()
+                except Exception:
+                    data = self.db.get()
+                if not data or not data.get("ids"):
+                    return 0
+                
+                ids_to_delete = []
+                metadatas = data.get("metadatas", [])
+                ids = data.get("ids", [])
+                for i, meta in enumerate(metadatas):
+                    if i >= len(ids):
+                        break
+                    if source and meta.get("source") != source:
+                        continue
+                    page_id = meta.get("page_id")
+                    if page_id is None:
+                        continue
+                    if page_id not in live_ids:
+                        ids_to_delete.append(ids[i])
+                
+                if ids_to_delete:
+                    self.db.delete(ids=ids_to_delete)
+                    deleted = len(ids_to_delete)
+            
+            elif self.backend == "faiss":
+                if not (hasattr(self.db, 'index_to_docstore_id') and hasattr(self.db, 'docstore')):
+                    return 0
+                
+                ids_to_delete = []
+                for doc_id in list(self.db.index_to_docstore_id.values()):
+                    try:
+                        doc = self.db.docstore.search(doc_id)
+                        if not isinstance(doc, Document):
+                            continue
+                        if source and doc.metadata.get("source") != source:
+                            continue
+                        page_id = doc.metadata.get("page_id")
+                        if page_id is None:
+                            continue
+                        if page_id not in live_ids:
+                            ids_to_delete.append(doc_id)
+                    except (KeyError, AttributeError):
+                        continue
+                
+                if ids_to_delete:
+                    self.db.delete(ids=ids_to_delete)
+                    self.db.save_local(self.path, index_name=self.collection)
+                    deleted = len(ids_to_delete)
+        except Exception:
+            return 0
+        
+        return deleted
+
     def upsert(self, documents: List):
         """Upsert documents with deterministic IDs to prevent duplicates."""
         if not documents:
@@ -440,9 +542,19 @@ def build_rag_index(
             _write(stdout, f"  → Extracting fields: {', '.join(field_names)}")
         
         # Extract documents from each page
+        live_ids: set[int] = set(pages.values_list("id", flat=True))
         for page_idx, page in enumerate(pages, 1):
             try:
                 _write(stdout, f"\n  [{page_idx}/{count}] Extracting: {page.title} (ID: {page.id})")
+                
+                skip_if_indexed = getattr(settings, "WAGTAIL_RAG_SKIP_IF_INDEXED", True)
+                last_published_at = None
+                if getattr(page, "last_published_at", None):
+                    last_published_at = page.last_published_at.isoformat()
+                
+                if not page_id and skip_if_indexed and store.page_is_current(page.id, last_published_at):
+                    _write(stdout, "    ↷ Skipping (already indexed and up-to-date)")
+                    continue
                 
                 # Try new extractor first, fallback to chunked
                 docs = None
@@ -485,6 +597,12 @@ def build_rag_index(
                 if stdout:
                     import traceback
                     _write(stdout, f"    {traceback.format_exc()}")
+        
+        prune_deleted = getattr(settings, "WAGTAIL_RAG_PRUNE_DELETED", True)
+        if not page_id and prune_deleted:
+            deleted = store.delete_pages_not_in(live_ids, source=model_name)
+            if deleted:
+                _write(stdout, f"  ✓ Pruned {deleted} stale document(s)")
     
     # Step 3: Summary
     _write(stdout, "\n" + "="*80)

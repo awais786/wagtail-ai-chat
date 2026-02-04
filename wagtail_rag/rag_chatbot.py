@@ -220,7 +220,7 @@ class RAGChatBot:
         if use_multi_query:
             logger.info(f"LLM Query Expansion enabled - using MultiQueryRetriever for query expansion")
             try:
-                return MultiQueryRetriever.from_llm(retriever=base_retriever, llm=self.llm)
+                return MultiQueryRetriever.from_llm(retriever=base_retriever, llm=self.llm, include_original=True)
             except Exception:
                 logger.warning("Failed to initialize MultiQueryRetriever, falling back to base retriever")
                 pass
