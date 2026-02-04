@@ -7,7 +7,7 @@ It handles both ChromaDB and FAISS backends for storing embeddings.
 """
 
 import os
-from typing import Optional, Iterable, Callable, List
+from typing import Optional, Iterable, Callable, List, Set
 from django.conf import settings
 from django.apps import apps
 from wagtail.models import Page
@@ -278,20 +278,25 @@ class ChromaStore:
                 try:
                     data = self.db.get(where={"page_id": page_id})
                 except Exception:
-                    data = self.db.get()
+                    # If the filtered query fails, avoid fetching the full index for performance reasons.
+                    # In this case, treat the page as not current.
+                    return False
                 metadatas = data.get("metadatas", []) if data else []
+                found = False
                 for meta in metadatas:
                     if meta.get("page_id") != page_id:
                         continue
+                    found = True
                     if last_published_at is None:
                         return True
-                    if meta.get("last_published_at") == last_published_at:
-                        return True
-                return False
+                    if meta.get("last_published_at") != last_published_at:
+                        return False
+                return found
             
             if self.backend == "faiss":
                 if not (hasattr(self.db, 'index_to_docstore_id') and hasattr(self.db, 'docstore')):
                     return False
+                found = False
                 for doc_id in list(self.db.index_to_docstore_id.values()):
                     try:
                         doc = self.db.docstore.search(doc_id)
@@ -299,17 +304,18 @@ class ChromaStore:
                             continue
                         if doc.metadata.get("page_id") != page_id:
                             continue
+                        found = True
                         if last_published_at is None:
                             return True
-                        if doc.metadata.get("last_published_at") == last_published_at:
-                            return True
+                        if doc.metadata.get("last_published_at") != last_published_at:
+                            return False
                     except (KeyError, AttributeError):
                         continue
-                return False
+                return found
         except Exception:
             return False
 
-    def delete_pages_not_in(self, live_ids: set[int], source: Optional[str] = None) -> int:
+    def delete_pages_not_in(self, live_ids: Set[int], source: Optional[str] = None) -> int:
         """
         Delete all indexed pages not in live_ids (optionally scoped to a model source).
         Returns number of docs deleted (best-effort).
@@ -548,7 +554,7 @@ def build_rag_index(
             _write(stdout, f"  → Extracting fields: {', '.join(field_names)}")
         
         # Extract documents from each page
-        live_ids: set[int] = set(pages.values_list("id", flat=True))
+        live_ids: Set[int] = set(pages.values_list("id", flat=True))
         for page_idx, page in enumerate(pages, 1):
             try:
                 _write(stdout, f"\n  [{page_idx}/{count}] Extracting: {page.title} (ID: {page.id})")

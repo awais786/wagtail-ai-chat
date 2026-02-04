@@ -244,7 +244,11 @@ WAGTAIL_RAG_EXCLUDE_MODELS = [
 # Text chunking configuration
 WAGTAIL_RAG_CHUNK_SIZE = 1000  # Size of each text chunk
 WAGTAIL_RAG_CHUNK_OVERLAP = 200  # Overlap between chunks
-
+# Index build behavior
+# Skip re-indexing pages that are already indexed and unchanged (default: True)
+WAGTAIL_RAG_SKIP_IF_INDEXED = True
+# Remove stale documents for pages that have been deleted (default: True)
+WAGTAIL_RAG_PRUNE_DELETED = True
 # Use new extractor by default (SmartWagtailExtractor: adaptive chunking for any page)
 # Default True. Set False to use the original chunked extractor (page_to_documents) only.
 WAGTAIL_RAG_USE_NEW_EXTRACTOR = True
