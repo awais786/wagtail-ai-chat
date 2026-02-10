@@ -169,6 +169,8 @@ def wagtail_page_to_documents(
         "title": page_title,
         "url": get_page_url(page),
     }
+    if getattr(page, "last_published_at", None):
+        base_meta["last_published_at"] = page.last_published_at.isoformat()
 
     documents = []
 
@@ -202,4 +204,3 @@ def wagtail_page_to_documents(
     documents.extend(body_docs)
 
     return documents
-
