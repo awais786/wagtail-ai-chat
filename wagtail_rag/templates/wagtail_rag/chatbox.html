@@ -217,6 +217,9 @@
         const userInput = document.getElementById('userInput');
         const sendButton = document.getElementById('sendButton');
 
+        const HISTORY_WINDOW = 6;
+        const conversation = [];
+
         // Send message
         function sendMessage() {
             const query = userInput.value.trim();
@@ -228,6 +231,7 @@
 
             // Add user message
             addMessage(query, 'user');
+            conversation.push({ role: 'user', content: query });
 
             // Clear input and disable button
             userInput.value = '';
@@ -275,7 +279,10 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ question })
+                    body: JSON.stringify({
+                        question,
+                        history: conversation.slice(-HISTORY_WINDOW),
+                    })
                 });
 
                 const data = await response.json();
@@ -285,6 +292,7 @@
                 }
 
                 addMessage(data.answer, 'bot', { sources: data.sources });
+                conversation.push({ role: 'assistant', content: data.answer });
             } catch (error) {
                 addMessage(`Error: ${error.message}`, 'bot');
                 const errorDiv = messagesContainer.querySelector('.message.bot:last-child .message-content');
@@ -306,4 +314,3 @@
     </script>
 </body>
 </html>
-

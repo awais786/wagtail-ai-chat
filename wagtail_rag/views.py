@@ -41,7 +41,11 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
     {
         "question": "What types of bread do you have?",
         "filter": {"model": "BreadPage"},  # optional metadata filter
-        "llm_kwargs": {"temperature": 0.7}  # optional LLM-specific parameters
+        "llm_kwargs": {"temperature": 0.7},  # optional LLM-specific parameters
+        "history": [
+            {"role": "user", "content": "What content is available?"},
+            {"role": "assistant", "content": "Here are the available pages..."}
+        ]
     }
 
     Note: LLM provider and model come from Django settings (WAGTAIL_RAG_LLM_PROVIDER, WAGTAIL_RAG_MODEL_NAME)
@@ -79,9 +83,10 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
                 data = json.loads(body)
             except json.JSONDecodeError as e:
                 return JsonResponse({"error": f"Invalid JSON: {e}"}, status=400)
-            question = (data.get("question") or "").strip()
-            metadata_filter = data.get("filter")
-            llm_kwargs = data.get("llm_kwargs") or {}
+        question = (data.get("question") or "").strip()
+        metadata_filter = data.get("filter")
+        llm_kwargs = data.get("llm_kwargs") or {}
+        chat_history = data.get("history") if isinstance(data.get("history"), list) else []
 
         if not question:
             return JsonResponse(
@@ -100,7 +105,8 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
         )
 
         chatbot = get_chatbot(metadata_filter=metadata_filter, llm_kwargs=llm_kwargs)
-        result = chatbot.query(question)
+        result = chatbot.query(question, chat_history=chat_history)
+
         return JsonResponse(result)
 
     except Exception:

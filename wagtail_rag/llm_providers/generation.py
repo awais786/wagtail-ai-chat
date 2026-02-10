@@ -75,6 +75,9 @@ class LLMGenerator:
 If the context does not mention some detail, simply do not talk about that detail.
 Do not say things like "the context does not contain" or explain what is missing.
 
+Conversation history:
+{history}
+
 Context:
 {context}
 
@@ -144,10 +147,29 @@ Answer:""",
             chain_type_kwargs={"prompt": prompt},
         )
 
-    def _format_simple_prompt(self, question: str, docs: List[Any]) -> str:
+    def _format_history(self, history: Optional[List[dict]]) -> str:
+        """Format conversation history for prompt injection."""
+        if not history:
+            return ""
+        lines: List[str] = []
+        for msg in history:
+            role = (msg.get("role") or "user").strip().lower()
+            content = (msg.get("content") or "").strip()
+            if not content:
+                continue
+            label = "User" if role == "user" else "Assistant"
+            lines.append(f"{label}: {content}")
+        return "\n".join(lines)
+
+    def _format_simple_prompt(self, question: str, docs: List[Any], history: Optional[List[dict]] = None) -> str:
         """Format a plain-text prompt using retrieved documents (fallback path)."""
         context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
-        return self.prompt_template_str.format(context=context, question=question)
+        history_text = self._format_history(history)
+        return self.prompt_template_str.format(
+            context=context,
+            question=question,
+            history=history_text,
+        )
 
     @staticmethod
     def _extract_text_from_result(result: Any) -> str:
@@ -206,13 +228,18 @@ Answer:""",
             logger.exception("All regular LLM invocation methods failed")
             raise
 
-    def generate_answer_with_llm(self, question: str, docs: List[Any]) -> str:
+    def generate_answer_with_llm(
+        self,
+        question: str,
+        docs: List[Any],
+        history: Optional[List[dict]] = None,
+    ) -> str:
         """Generate an answer by formatting a prompt and calling the raw LLM callable.
 
         This is used as a fallback when no QA chain is available.
         Handles both chat models (ChatOllama, ChatOpenAI, etc.) and regular LLMs.
         """
-        prompt_text = self._format_simple_prompt(question, docs)
+        prompt_text = self._format_simple_prompt(question, docs, history=history)
         
         # Detect if this is a chat model (expects messages, not plain strings)
         is_chat_model = (
@@ -226,7 +253,12 @@ Answer:""",
         else:
             return self._invoke_regular_llm(prompt_text)
 
-    def generate_answer(self, question: str, docs: Optional[List[Any]] = None) -> str:
+    def generate_answer(
+        self,
+        question: str,
+        docs: Optional[List[Any]] = None,
+        history: Optional[List[dict]] = None,
+    ) -> str:
         """Main entry point for generating an answer.
 
         Behavior:
@@ -239,7 +271,7 @@ Answer:""",
         # This ensures we use the documents from our hybrid search (vector + Wagtail)
         if docs:
             logger.debug(f"Using {len(docs)} pre-retrieved documents for LLM context")
-            return self.generate_answer_with_llm(question, docs)
+            return self.generate_answer_with_llm(question, docs, history=history)
 
         # Fallback mode: no chain
         if self.qa_chain is None:

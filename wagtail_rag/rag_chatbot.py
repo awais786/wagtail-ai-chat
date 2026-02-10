@@ -242,7 +242,7 @@ class RAGChatBot:
             for doc in docs
         ]
 
-    def query(self, question, boost_title_matches=True):
+    def query(self, question, boost_title_matches=True, chat_history=None):
         """
         Query the RAG chatbot with a question.
         
@@ -262,7 +262,10 @@ class RAGChatBot:
         """
         # Step 1: Retrieve documents using embedding search
         logger.info(f"Starting RAG pipeline for question: '{question}'")
-        docs = self.embedding_searcher.retrieve_with_embeddings(question, boost_title_matches=boost_title_matches)
+        docs = self.embedding_searcher.retrieve_with_embeddings(
+            question,
+            boost_title_matches=boost_title_matches,
+        )
         logger.info(f"Retrieved {len(docs)} documents for LLM context")
         
         # Step 2: Generate answer using LLM with retrieved context
@@ -271,7 +274,7 @@ class RAGChatBot:
         
         # Always use the retrieved documents - don't let the chain re-retrieve
         # This ensures we use the documents from our hybrid search (vector + Wagtail)
-        answer = self.llm_generator.generate_answer(question, docs=docs)
+        answer = self.llm_generator.generate_answer(question, docs=docs, history=chat_history)
         
         logger.info(f"Answer generated successfully")
         logger.info(f"LLM Result: {answer[:200] if isinstance(answer, str) else str(answer)[:200]}{'...' if (len(answer) if isinstance(answer, str) else len(str(answer))) > 200 else ''}")
