@@ -106,6 +106,31 @@ class OpenAIProvider(BaseEmbeddingProvider):
         return OpenAIEmbeddings(model=model_name, api_key=api_key, **kwargs)
 
 
+class OllamaProvider(BaseEmbeddingProvider):
+    def create(self, model_name: Optional[str], **kwargs) -> Any:
+        # Try multiple import paths for Ollama embeddings
+        OllamaEmbeddings = None
+        import_paths = [
+            ("langchain_ollama", "OllamaEmbeddings"),
+            ("langchain.embeddings", "OllamaEmbeddings"),
+        ]
+        
+        for module_path, class_name in import_paths:
+            try:
+                module = __import__(module_path, fromlist=[class_name])
+                OllamaEmbeddings = getattr(module, class_name)
+                break
+            except (ImportError, AttributeError):
+                continue
+        
+        if OllamaEmbeddings is None:
+            raise ImportError("Ollama embeddings are not installed. Install: pip install langchain-ollama")
+
+        if not model_name:
+            raise ValueError("model_name is required for Ollama embeddings")
+        
+        return OllamaEmbeddings(model=model_name, **kwargs)
+
 # --- Factory using provider classes -----------------------------------
 class EmbeddingProviderFactory:
     """Create embedding instances for supported providers.
@@ -119,6 +144,7 @@ class EmbeddingProviderFactory:
         "sentence_transformers": HuggingFaceProvider,
         "sentence-transformers": HuggingFaceProvider,
         "openai": OpenAIProvider,
+        "ollama": OllamaProvider,
     }
 
     def __init__(self, django_settings=None):
