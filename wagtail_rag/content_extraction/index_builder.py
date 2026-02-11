@@ -14,9 +14,9 @@ from wagtail.models import Page
 from .page_to_documents import wagtail_page_to_documents
 
 try:
-    from .smart_extractor import page_to_documents_new_extractor
+    from .api_extractor import page_to_documents_api_extractor
 except ImportError:
-    page_to_documents_new_extractor = None
+    page_to_documents_api_extractor = None
 
 try:
     from langchain_core.documents import Document
@@ -531,8 +531,8 @@ def build_rag_index(
     
     total_docs = 0
     total_pages = 0
-    use_new = getattr(settings, "WAGTAIL_RAG_USE_NEW_EXTRACTOR", True) and page_to_documents_new_extractor
-    _write(stdout, f"→ Using {'smart' if use_new else 'chunked'} extractor")
+    use_api = getattr(settings, "WAGTAIL_RAG_USE_API_EXTRACTOR", True) and page_to_documents_api_extractor
+    _write(stdout, f"→ Using {'API' if use_api else 'chunked'} extractor")
     
     # Process each model
     _write(stdout, "")
@@ -557,7 +557,7 @@ def build_rag_index(
         live_ids: Set[int] = set(pages.values_list("id", flat=True))
         for page_idx, page in enumerate(pages, 1):
             try:
-                _write(stdout, f"\n  [{page_idx}/{count}] Extracting: {page.title} (ID: {page.id})")
+                _write(stdout, f"  [{page_idx}/{count}] {page.title} (ID: {page.id})")
                 
                 skip_if_indexed = getattr(settings, "WAGTAIL_RAG_SKIP_IF_INDEXED", True)
                 last_published_at = None
@@ -568,24 +568,22 @@ def build_rag_index(
                     _write(stdout, "    ↷ Skipping (already indexed and up-to-date)")
                     continue
                 
-                # Try new extractor first, fallback to chunked
+                # Try API extractor first, fallback to chunked
                 docs = None
-                if use_new:
-                    docs = page_to_documents_new_extractor(page, stdout=None)
+                if use_api:
+                    docs = page_to_documents_api_extractor(page, stdout=stdout)
                 if not docs:
                     docs = wagtail_page_to_documents(
                         page, 
                         chunk_size=getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 500),
                         chunk_overlap=getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 75),
-                        stdout=None,
+                        stdout=stdout,
                         streamfield_field_names=field_names,
                     )
-                
+
                 if not docs:
-                    _write(stdout, "    ⚠ No documents extracted (empty page)")
+                    _write(stdout, "      ⚠ No documents")
                     continue
-                
-                _write(stdout, f"    ✓ Extracted {len(docs)} document(s)")
                 
                 # Add model metadata
                 for doc in docs:
@@ -596,26 +594,26 @@ def build_rag_index(
                     })
                 
                 # Save to vector store
-                _write(stdout, f"    → Saving to vector store...")
                 store.delete_page(page.id)
                 store.upsert(docs)
-                _write(stdout, f"    ✓ Saved {len(docs)} document(s)")
-                
+                _write(stdout, f"      ✓ Saved {len(docs)} document(s)")
+
                 total_docs += len(docs)
                 total_pages += 1
                 
             except Exception as e:
-                _write(stdout, f"    ✗ Error: {e}")
+                _write(stdout, f"      ✗ Error: {e}")
+                logger.exception(f"Error indexing page {page.id}")
                 if stdout:
                     import traceback
-                    _write(stdout, f"    {traceback.format_exc()}")
+                    _write(stdout, f"      {traceback.format_exc()}")
         
         prune_deleted = getattr(settings, "WAGTAIL_RAG_PRUNE_DELETED", True)
         if not page_id and prune_deleted:
             deleted = store.delete_pages_not_in(live_ids, source=model_name)
             if deleted:
                 _write(stdout, f"  ✓ Pruned {deleted} stale document(s)")
-    
+
     # Step 3: Summary
     _write(stdout, "\n" + "="*80)
     _write(stdout, "STEP 3: Indexing Complete")

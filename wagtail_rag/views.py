@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 MAX_REQUEST_BODY_SIZE = getattr(settings, "WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE", 1024 * 1024)
 
 
-@csrf_exempt
 @require_http_methods(["GET", "POST"])
+@csrf_exempt
 def rag_chat_api(request: HttpRequest) -> JsonResponse:
     """
     API endpoint for RAG chatbot queries.
