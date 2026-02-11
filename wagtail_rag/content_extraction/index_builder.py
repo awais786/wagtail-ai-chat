@@ -540,8 +540,14 @@ def build_rag_index(
         model_name = f"{model._meta.app_label}.{model.__name__}"
         pages = get_live_pages(model, page_id)
         count = pages.count()
+        live_ids: Set[int] = set(pages.values_list("id", flat=True))
         
         if count == 0:
+            prune_deleted = getattr(settings, "WAGTAIL_RAG_PRUNE_DELETED", True)
+            if not page_id and prune_deleted:
+                deleted = store.delete_pages_not_in(live_ids, source=model_name)
+                if deleted:
+                    _write(stdout, f"  ✓ Pruned {deleted} stale document(s)")
             continue
         
         _write(stdout, f"\n[{model_idx}/{len(models)}] Processing {model_name}:")
@@ -554,7 +560,6 @@ def build_rag_index(
             _write(stdout, f"  → Extracting fields: {', '.join(field_names)}")
         
         # Extract documents from each page
-        live_ids: Set[int] = set(pages.values_list("id", flat=True))
         for page_idx, page in enumerate(pages, 1):
             try:
                 _write(stdout, f"  [{page_idx}/{count}] {page.title} (ID: {page.id})")

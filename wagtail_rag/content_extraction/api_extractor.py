@@ -206,6 +206,8 @@ class WagtailAPIExtractor:
             "slug": getattr(page, 'slug', ''),
             "url": self._get_page_url(page),
         }
+        if getattr(page, "last_published_at", None):
+            metadata["last_published_at"] = page.last_published_at.isoformat()
         
         # Extract all fields
         sections = {}
@@ -282,4 +284,3 @@ def page_to_documents_api_extractor(page, stdout=None) -> List[Document]:
         size_threshold=getattr(settings, 'WAGTAIL_RAG_SIZE_THRESHOLD', DEFAULT_SIZE_THRESHOLD),
     )
     return extractor.extract_page(page)
-
