@@ -63,6 +63,83 @@ class WagtailAPIExtractor:
                 return f"/page/{page.id}/"
     
     @staticmethod
+    def _get_available_content_fields(page) -> List[str]:
+        """
+        Get all available content fields on a page (for debugging).
+        Shows what fields exist, even if they're empty.
+        """
+        from wagtail.fields import StreamField, RichTextField
+        from django.db.models import TextField, ForeignKey, ManyToManyField
+        
+        # System fields to skip
+        SYSTEM_FIELDS = {
+            'id', 'path', 'depth', 'title', 'slug', 'draft_title',
+            'content_type', 'live', 'has_unpublished_changes', 'owner',
+            'locked', 'locked_at', 'locked_by', 'latest_revision',
+            'latest_revision_created_at', 'live_revision', 'first_published_at',
+            'last_published_at', 'go_live_at', 'expire_at', 'expired',
+            'search_description', 'seo_title', 'show_in_menus', 'url_path',
+            'translation_key', 'locale', 'alias_of',
+        }
+        
+        available_fields = []
+        
+        try:
+            for field in page._meta.get_fields():
+                field_name = field.name
+                
+                # Skip system fields
+                if field_name.startswith('_') or field_name in SYSTEM_FIELDS:
+                    continue
+                
+                # Skip relationship fields
+                if isinstance(field, (ForeignKey, ManyToManyField)):
+                    continue
+                
+                # List all content fields (even empty ones)
+                if isinstance(field, (StreamField, RichTextField, TextField)):
+                    available_fields.append(field_name)
+        except Exception as e:
+            logger.debug(f"Error listing fields for {page.__class__.__name__}: {e}")
+        
+        return available_fields
+    
+    @staticmethod
+    def _discover_content_fields(page) -> List[str]:
+        """
+        Auto-discover content fields on a page by inspecting field types.
+        Looks for StreamFields, RichTextFields, and TextFields.
+        Excludes ForeignKeys and ManyToMany relationships.
+        """
+        from wagtail.fields import StreamField, RichTextField
+        from django.db.models import TextField, ForeignKey, ManyToManyField
+        
+        content_fields = []
+        
+        try:
+            for field in page._meta.get_fields():
+                field_name = field.name
+                
+                # Skip system fields
+                if field_name.startswith('_') or field_name in ['id', 'path', 'depth', 'title', 'slug']:
+                    continue
+                
+                # Skip relationship fields
+                if isinstance(field, (ForeignKey, ManyToManyField)):
+                    continue
+                
+                # Check if it's a content field
+                if isinstance(field, (StreamField, RichTextField, TextField)):
+                    # Verify the field has content
+                    value = getattr(page, field_name, None)
+                    if value:
+                        content_fields.append(field_name)
+        except Exception as e:
+            logger.debug(f"Error discovering fields for {page.__class__.__name__}: {e}")
+        
+        return content_fields
+    
+    @staticmethod
     def _clean_text(text) -> str:
         """Clean text by stripping HTML and normalizing whitespace."""
         if not text:
@@ -185,18 +262,39 @@ class WagtailAPIExtractor:
         This is simpler than manual parsing because we let Wagtail handle
         the complexity of different field types.
         """
-        # Get all API fields defined on the page
+        # Debug: Show all available content fields on this page
+        available_fields = self._get_available_content_fields(page)
+        if available_fields:
+            logger.info(f"Available content fields on {page.__class__.__name__}: {', '.join(available_fields)}")
+        
+        # Step 1: Try to get API fields defined on the page
         api_fields = []
+        field_source = None
+        
         if hasattr(page, 'api_fields'):
             api_fields = [f.name for f in page.api_fields if hasattr(f, 'name')]
+            if api_fields:
+                field_source = f"model api_fields: {', '.join(api_fields)}"
+                logger.debug(f"Using api_fields from {page.__class__.__name__}: {', '.join(api_fields)}")
         
-        # Fallback: use common field names or configured defaults
+        # Step 2: Fallback to configured default fields
         if not api_fields:
             api_fields = getattr(
                 settings, 
                 'WAGTAIL_RAG_DEFAULT_FIELDS', 
                 ['introduction', 'body', 'content', 'backstory']
             )
+            field_source = f"default fields"
+            logger.debug(f"No api_fields, trying default fields: {', '.join(api_fields)}")
+        
+        # Step 3: Last resort - auto-discover content fields
+        if not any(hasattr(page, field) for field in api_fields):
+            logger.debug(f"No standard fields found on {page.__class__.__name__}, auto-discovering...")
+            discovered_fields = self._discover_content_fields(page)
+            if discovered_fields:
+                api_fields = discovered_fields
+                field_source = f"auto-discovered: {', '.join(discovered_fields)}"
+                logger.debug(f"Discovered fields: {', '.join(discovered_fields)}")
 
         # Base metadata
         metadata = {
@@ -224,10 +322,19 @@ class WagtailAPIExtractor:
         full_content = "\n\n".join(sections.values())
         content_length = len(full_content)
         
+        # Log extraction details
         logger.debug(
             f"Page '{page.title}' (ID: {page.id}): extracted {len(extracted_fields)} fields "
             f"({', '.join(extracted_fields)}), {content_length} chars total"
         )
+        
+        # If no meaningful content extracted (only title), return empty list to trigger fallback
+        if len(extracted_fields) == 1 and extracted_fields[0] == 'title':
+            logger.warning(
+                f"No content fields found for {page.__class__.__name__} (ID: {page.id}). "
+                "Returning empty list to trigger fallback extractor."
+            )
+            return []
 
         # Small page: single document
         if content_length <= self.size_threshold:
@@ -240,6 +347,8 @@ class WagtailAPIExtractor:
                     "total_chunks": 1,
                     "content_length": content_length,
                     "doc_id": f"{page.id}_full_0",
+                    "field_source": field_source,
+                    "extracted_fields": ', '.join(extracted_fields),  # Include title now
                 }
             )]
         
@@ -258,6 +367,8 @@ class WagtailAPIExtractor:
                     "total_chunks": len(chunks),
                     "content_length": len(chunk),
                     "doc_id": f"{page.id}_chunk_{i}",
+                    "field_source": field_source,
+                    "extracted_fields": ', '.join(extracted_fields),  # Include title now
                 }
             ))
         
@@ -278,5 +389,9 @@ def page_to_documents_api_extractor(page, stdout=None) -> List[Document]:
     Returns:
         List of Document objects
     """
-    extractor = WagtailAPIExtractor()
+    extractor = WagtailAPIExtractor(
+        chunk_size=getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', DEFAULT_CHUNK_SIZE),
+        chunk_overlap=getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', DEFAULT_CHUNK_OVERLAP),
+        size_threshold=getattr(settings, 'WAGTAIL_RAG_SIZE_THRESHOLD', DEFAULT_SIZE_THRESHOLD),
+    )
     return extractor.extract_page(page)
