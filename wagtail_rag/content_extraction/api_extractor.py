@@ -4,7 +4,7 @@ Simple extractor using Wagtail's API serialization.
 Uses Wagtail's built-in methods to extract content, avoiding manual field type handling.
 """
 import logging
-from typing import List, Optional, Dict
+from typing import List, Optional
 
 from django.conf import settings
 from django.utils.html import strip_tags
@@ -278,9 +278,5 @@ def page_to_documents_api_extractor(page, stdout=None) -> List[Document]:
     Returns:
         List of Document objects
     """
-    extractor = WagtailAPIExtractor(
-        chunk_size=getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', DEFAULT_CHUNK_SIZE),
-        chunk_overlap=getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', DEFAULT_CHUNK_OVERLAP),
-        size_threshold=getattr(settings, 'WAGTAIL_RAG_SIZE_THRESHOLD', DEFAULT_SIZE_THRESHOLD),
-    )
+    extractor = WagtailAPIExtractor()
     return extractor.extract_page(page)
