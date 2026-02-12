@@ -217,6 +217,23 @@
         const userInput = document.getElementById('userInput');
         const sendButton = document.getElementById('sendButton');
 
+        const SESSION_KEY = 'ragChatSessionId';
+        let sessionId = sessionStorage.getItem(SESSION_KEY);
+
+        function generateSessionId() {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return window.crypto.randomUUID();
+            }
+            return `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        }
+
+        function ensureSessionId() {
+            if (!sessionId) {
+                sessionId = generateSessionId();
+                sessionStorage.setItem(SESSION_KEY, sessionId);
+            }
+        }
+
         // Send message
         function sendMessage() {
             const query = userInput.value.trim();
@@ -225,6 +242,8 @@
             // Clear empty state
             const emptyState = messagesContainer.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
+
+            ensureSessionId();
 
             // Add user message
             addMessage(query, 'user');
@@ -275,13 +294,18 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ question })
+                    body: JSON.stringify({ question, session_id: sessionId })
                 });
 
                 const data = await response.json();
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to get response');
+                }
+
+                if (data.session_id) {
+                    sessionId = data.session_id;
+                    sessionStorage.setItem(SESSION_KEY, sessionId);
                 }
 
                 addMessage(data.answer, 'bot', { sources: data.sources });
@@ -306,4 +330,3 @@
     </script>
 </body>
 </html>
-

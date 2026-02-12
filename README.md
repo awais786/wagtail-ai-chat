@@ -173,7 +173,7 @@ curl "http://localhost:8000/api/rag/chat/?q=What content is available?"
 ```bash
 curl -X POST http://localhost:8000/api/rag/chat/ \
   -H "Content-Type: application/json" \
-  -d '{"question": "What content is available?"}'
+  -d '{"question": "What content is available?", "session_id": "my-session"}'
 ```
 
 **Note**: LLM provider and model are automatically read from Django settings (`WAGTAIL_RAG_LLM_PROVIDER` and `WAGTAIL_RAG_MODEL_NAME`). You don't need to pass them in the request.
@@ -216,6 +216,10 @@ WAGTAIL_RAG_USE_HYBRID_SEARCH = True
 ```python
 # Max POST body size in bytes for the chat API (default: 1MB). Helps prevent DoS from huge payloads.
 WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE = 1024 * 1024
+
+# Chat history (server-side with summarization of older turns)
+WAGTAIL_RAG_ENABLE_CHAT_HISTORY = True
+WAGTAIL_RAG_CHAT_HISTORY_RECENT_MESSAGES = 6
 ```
 
 The chat endpoint (`/api/rag/chat/`) is CSRF-exempt so it can be called by external clients, scripts, or non-Django frontends. If the endpoint is public, protect it at the network or gateway level (e.g. authentication, rate limiting, or IP allowlisting).

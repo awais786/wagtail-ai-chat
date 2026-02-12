@@ -11,19 +11,27 @@ from typing import Any, List, Optional
 
 from django.conf import settings
 
+from wagtail_rag.chat_history import get_history_store
+
 logger = logging.getLogger(__name__)
 
 # Detect LangChain edition / available components
 try:
     # LCEL-style (newer langchain-core) primitives
-    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain_core.runnables import RunnablePassthrough
     from langchain_core.output_parsers import StrOutputParser
+    try:
+        from langchain_core.runnables import RunnableWithMessageHistory
+    except Exception:
+        from langchain_core.runnables.history import RunnableWithMessageHistory
     LCEL_AVAILABLE = True
 except Exception:
     ChatPromptTemplate = None
+    MessagesPlaceholder = None
     RunnablePassthrough = None
     StrOutputParser = None
+    RunnableWithMessageHistory = None
     LCEL_AVAILABLE = False
 
 try:
@@ -64,7 +72,18 @@ class LLMGenerator:
         self.llm = llm
         self.retriever = retriever
         self.prompt_template_str = self._get_prompt_template()
+        self.system_prompt_str = self._get_system_prompt()
+        self.history_enabled = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
+        self.history_recent_window = int(
+            getattr(settings, "WAGTAIL_RAG_CHAT_HISTORY_RECENT_MESSAGES", 6)
+        )
+        self.history_store = (
+            get_history_store(self._summarize_history, self.history_recent_window)
+            if self.history_enabled
+            else None
+        )
         self.qa_chain = self._create_qa_chain()
+        self.history_chain = self._create_history_chain()
 
     def _get_prompt_template(self) -> str:
         """Return prompt template from settings or default."""
@@ -82,6 +101,16 @@ Question:
 {question}
 
 Answer:""",
+        )
+
+    def _get_system_prompt(self) -> str:
+        """System prompt used for chat-history runs."""
+        return getattr(
+            settings,
+            "WAGTAIL_RAG_SYSTEM_PROMPT",
+            """You are a helpful assistant. Use ONLY the following context to answer the question.
+If the context does not mention some detail, simply do not talk about that detail.
+Do not say things like "the context does not contain" or explain what is missing.""",
         )
 
     def _create_qa_chain(self) -> Optional[Any]:
@@ -105,6 +134,34 @@ Answer:""",
                 logger.exception("Failed to create legacy RetrievalQA chain")
 
         return None
+
+    def _create_history_chain(self) -> Optional[Any]:
+        """Create a chat chain wrapped with RunnableWithMessageHistory."""
+        if not (
+            LCEL_AVAILABLE
+            and ChatPromptTemplate
+            and MessagesPlaceholder
+            and StrOutputParser
+            and RunnableWithMessageHistory
+            and self.history_store
+        ):
+            return None
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", self.system_prompt_str),
+                MessagesPlaceholder("history"),
+                ("human", "{input}"),
+            ]
+        )
+
+        chain = prompt | self.llm | StrOutputParser()  # type: ignore[operator]
+        return RunnableWithMessageHistory(  # type: ignore[call-arg]
+            chain,
+            self.history_store.get_session_history,
+            input_messages_key="input",
+            history_messages_key="history",
+        )
 
     def _create_lcel_chain(self) -> Any:
         """Create an LCEL-style chain using langchain_core primitives.
@@ -144,10 +201,46 @@ Answer:""",
             chain_type_kwargs={"prompt": prompt},
         )
 
-    def _format_simple_prompt(self, question: str, docs: List[Any]) -> str:
+    def _format_simple_prompt(
+        self,
+        question: str,
+        docs: List[Any],
+    ) -> str:
         """Format a plain-text prompt using retrieved documents (fallback path)."""
         context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
-        return self.prompt_template_str.format(context=context, question=question)
+        return self.prompt_template_str.format(
+            context=context,
+            question=question,
+        )
+
+    def _is_chat_model(self) -> bool:
+        return (
+            hasattr(self.llm, '__class__') and 'Chat' in self.llm.__class__.__name__
+        ) or (
+            hasattr(self.llm, 'invoke') and not hasattr(self.llm, 'generate')
+        )
+
+    def _summarize_history(self, summary: str, new_messages_text: str) -> str:
+        """Summarize older history turns to keep context compact."""
+        if not new_messages_text.strip():
+            return summary
+
+        prompt = (
+            "You are summarizing a conversation for future context.\n\n"
+            f"Existing summary:\n{summary}\n\n"
+            f"New messages:\n{new_messages_text}\n\n"
+            "Updated summary (concise, factual, preserve names and decisions):"
+        )
+
+        try:
+            if self._is_chat_model():
+                result = self._invoke_chat_model(prompt)
+            else:
+                result = self._invoke_regular_llm(prompt)
+            return (result or "").strip()
+        except Exception:
+            logger.exception("History summarization failed; keeping existing summary")
+            return summary
 
     @staticmethod
     def _extract_text_from_result(result: Any) -> str:
@@ -206,27 +299,42 @@ Answer:""",
             logger.exception("All regular LLM invocation methods failed")
             raise
 
-    def generate_answer_with_llm(self, question: str, docs: List[Any]) -> str:
+
+    def generate_answer_with_llm(
+        self,
+        question: str,
+        docs: List[Any],
+        session_id: Optional[str] = None,
+    ) -> str:
         """Generate an answer by formatting a prompt and calling the raw LLM callable.
 
         This is used as a fallback when no QA chain is available.
         Handles both chat models (ChatOllama, ChatOpenAI, etc.) and regular LLMs.
         """
+        context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
+        input_text = f"Context:\n{context}\n\nQuestion:\n{question}"
         prompt_text = self._format_simple_prompt(question, docs)
         
         # Detect if this is a chat model (expects messages, not plain strings)
-        is_chat_model = (
-            hasattr(self.llm, '__class__') and 'Chat' in self.llm.__class__.__name__
-        ) or (
-            hasattr(self.llm, 'invoke') and not hasattr(self.llm, 'generate')
-        )
+        is_chat_model = self._is_chat_model()
         
+        if is_chat_model and self.history_chain and session_id:
+            result = self.history_chain.invoke(
+                {"input": input_text},
+                config={"configurable": {"session_id": session_id}},
+            )
+            return self._extract_text_from_result(result)
+
         if is_chat_model:
             return self._invoke_chat_model(prompt_text)
-        else:
-            return self._invoke_regular_llm(prompt_text)
+        return self._invoke_regular_llm(prompt_text)
 
-    def generate_answer(self, question: str, docs: Optional[List[Any]] = None) -> str:
+    def generate_answer(
+        self,
+        question: str,
+        docs: Optional[List[Any]] = None,
+        session_id: Optional[str] = None,
+    ) -> str:
         """Main entry point for generating an answer.
 
         Behavior:
@@ -239,7 +347,11 @@ Answer:""",
         # This ensures we use the documents from our hybrid search (vector + Wagtail)
         if docs:
             logger.debug(f"Using {len(docs)} pre-retrieved documents for LLM context")
-            return self.generate_answer_with_llm(question, docs)
+            return self.generate_answer_with_llm(
+                question,
+                docs,
+                session_id=session_id,
+            )
 
         # Fallback mode: no chain
         if self.qa_chain is None:

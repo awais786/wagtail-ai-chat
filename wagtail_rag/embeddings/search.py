@@ -150,10 +150,10 @@ class EmbeddingSearcher:
     def _get_page_to_documents_function(self) -> Optional[Callable]:
         """Lazy import page_to_documents function from wagtail_rag.content_extraction."""
         try:
-            from wagtail_rag.content_extraction import wagtail_page_to_documents
-            return wagtail_page_to_documents
+            from wagtail_rag.content_extraction import page_to_documents_api_extractor
+            return page_to_documents_api_extractor
         except Exception as e:
-            logger.debug("wagtail_page_to_documents not available: %s", e)
+            logger.debug("page_to_documents_api_extractor not available: %s", e)
             return None
 
     def _convert_wagtail_page_to_documents(self, page: Any) -> List[Document]:
@@ -161,15 +161,15 @@ class EmbeddingSearcher:
         Convert a Wagtail Page object into Document objects using the same logic as indexing.
         
         This ensures consistency between indexed documents and search-time documents.
-        Uses wagtail_page_to_documents() which creates chunked documents (title, intro, body chunks).
+        Uses api_fields_extractor for intelligent field-based extraction.
         """
         try:
-            wagtail_page_to_documents_func = self._get_page_to_documents_function()
+            page_to_documents_func = self._get_page_to_documents_function()
             
-            if wagtail_page_to_documents_func:
+            if page_to_documents_func:
                 # Use the same document conversion logic as indexing
-                # This creates multiple documents (title, intro, body chunks) with proper metadata
-                documents = wagtail_page_to_documents_func(page)
+                # This creates multiple documents with proper metadata
+                documents = page_to_documents_func(page)
                 
                 # Mark these documents as coming from Wagtail search
                 for doc in documents:

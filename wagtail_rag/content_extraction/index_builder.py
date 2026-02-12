@@ -6,17 +6,19 @@ orchestrating page selection, document extraction, and vector store operations.
 It handles both ChromaDB and FAISS backends for storing embeddings.
 """
 
+import logging
 import os
 from typing import Optional, Iterable, Callable, List, Set
 from django.conf import settings
 from django.apps import apps
 from wagtail.models import Page
-from .page_to_documents import wagtail_page_to_documents
+
+logger = logging.getLogger(__name__)
 
 try:
-    from .smart_extractor import page_to_documents_new_extractor
+    from .api_fields_extractor import page_to_documents_api_extractor
 except ImportError:
-    page_to_documents_new_extractor = None
+    page_to_documents_api_extractor = None
 
 try:
     from langchain_core.documents import Document
@@ -531,8 +533,12 @@ def build_rag_index(
     
     total_docs = 0
     total_pages = 0
-    use_new = getattr(settings, "WAGTAIL_RAG_USE_NEW_EXTRACTOR", True) and page_to_documents_new_extractor
-    _write(stdout, f"→ Using {'smart' if use_new else 'chunked'} extractor")
+    
+    if not page_to_documents_api_extractor:
+        _write(stdout, "ERROR: api_fields_extractor not available")
+        return
+    
+    _write(stdout, "→ Using api_fields_extractor")
     
     # Process each model
     _write(stdout, "")
@@ -540,8 +546,14 @@ def build_rag_index(
         model_name = f"{model._meta.app_label}.{model.__name__}"
         pages = get_live_pages(model, page_id)
         count = pages.count()
+        live_ids: Set[int] = set(pages.values_list("id", flat=True))
         
         if count == 0:
+            prune_deleted = getattr(settings, "WAGTAIL_RAG_PRUNE_DELETED", True)
+            if not page_id and prune_deleted:
+                deleted = store.delete_pages_not_in(live_ids, source=model_name)
+                if deleted:
+                    _write(stdout, f"  ✓ Pruned {deleted} stale document(s)")
             continue
         
         _write(stdout, f"\n[{model_idx}/{len(models)}] Processing {model_name}:")
@@ -554,10 +566,9 @@ def build_rag_index(
             _write(stdout, f"  → Extracting fields: {', '.join(field_names)}")
         
         # Extract documents from each page
-        live_ids: Set[int] = set(pages.values_list("id", flat=True))
         for page_idx, page in enumerate(pages, 1):
             try:
-                _write(stdout, f"\n  [{page_idx}/{count}] Extracting: {page.title} (ID: {page.id})")
+                _write(stdout, f"  [{page_idx}/{count}] {page.title} (ID: {page.id})")
                 
                 skip_if_indexed = getattr(settings, "WAGTAIL_RAG_SKIP_IF_INDEXED", True)
                 last_published_at = None
@@ -568,54 +579,80 @@ def build_rag_index(
                     _write(stdout, "    ↷ Skipping (already indexed and up-to-date)")
                     continue
                 
-                # Try new extractor first, fallback to chunked
-                docs = None
-                if use_new:
-                    docs = page_to_documents_new_extractor(page, stdout=None)
-                if not docs:
-                    docs = wagtail_page_to_documents(
-                        page, 
-                        chunk_size=getattr(settings, 'WAGTAIL_RAG_CHUNK_SIZE', 500),
-                        chunk_overlap=getattr(settings, 'WAGTAIL_RAG_CHUNK_OVERLAP', 75),
-                        stdout=None,
-                        streamfield_field_names=field_names,
-                    )
+                # Show which fields will be attempted for extraction
+                # Check if page has api_fields defined
+                extraction_source = None
+                fields_to_show = []
+                
+                if hasattr(page, 'api_fields'):
+                    api_field_names = [f.name for f in page.api_fields if hasattr(f, 'name')]
+                    if api_field_names:
+                        extraction_source = "model api_fields"
+                        fields_to_show = api_field_names
+                
+                if not fields_to_show:
+                    # Show default fields that will be tried
+                    default_fields = getattr(settings, 'WAGTAIL_RAG_DEFAULT_FIELDS', 
+                                            ['introduction', 'body', 'content', 'backstory'])
+                    extraction_source = "default fields"
+                    fields_to_show = default_fields
+                
+                # Show what will be attempted
+                _write(stdout, f"      📋 Will try extracting: {', '.join(fields_to_show)} (from {extraction_source})")
+                
+                # Extract documents
+                _write(stdout, "      → Extracting content...")
+                docs = page_to_documents_api_extractor(page, stdout=stdout)
                 
                 if not docs:
-                    _write(stdout, "    ⚠ No documents extracted (empty page)")
+                    _write(stdout, "      ⚠ No content extracted (all fields empty)")
                     continue
                 
-                _write(stdout, f"    ✓ Extracted {len(docs)} document(s)")
+                # Show what was actually indexed
+                field_info = docs[0].metadata.get('field_source', '')
+                extracted_fields = docs[0].metadata.get('extracted_fields', 'title')
                 
-                # Add model metadata
+                # Compare what was tried vs what was actually indexed
+                indexed_list = [f.strip() for f in extracted_fields.split(',')]
+                not_indexed = [f for f in fields_to_show if f not in indexed_list]
+                
+                _write(stdout, f"      ✅ Indexed fields: {extracted_fields}")
+                if not_indexed:
+                    _write(stdout, f"      ⊘ Skipped: {', '.join(not_indexed)} (empty or missing)")
+                _write(stdout, f"      💾 Created {len(docs)} document(s)")
+                
+                extractor_used = "api_fields_extractor"
+                
+                # Add model metadata (including which extractor was used)
                 for doc in docs:
                     doc.metadata.update({
                         "source": model_name,
                         "model": model.__name__,
                         "app": model._meta.app_label,
+                        "extractor": extractor_used,
                     })
                 
                 # Save to vector store
-                _write(stdout, f"    → Saving to vector store...")
                 store.delete_page(page.id)
                 store.upsert(docs)
-                _write(stdout, f"    ✓ Saved {len(docs)} document(s)")
-                
+                _write(stdout, f"      💾 Indexed with {extractor_used}")
+
                 total_docs += len(docs)
                 total_pages += 1
                 
             except Exception as e:
-                _write(stdout, f"    ✗ Error: {e}")
+                _write(stdout, f"      ✗ Error: {e}")
+                logger.exception(f"Error indexing page {page.id}")
                 if stdout:
                     import traceback
-                    _write(stdout, f"    {traceback.format_exc()}")
+                    _write(stdout, f"      {traceback.format_exc()}")
         
         prune_deleted = getattr(settings, "WAGTAIL_RAG_PRUNE_DELETED", True)
         if not page_id and prune_deleted:
             deleted = store.delete_pages_not_in(live_ids, source=model_name)
             if deleted:
                 _write(stdout, f"  ✓ Pruned {deleted} stale document(s)")
-    
+
     # Step 3: Summary
     _write(stdout, "\n" + "="*80)
     _write(stdout, "STEP 3: Indexing Complete")
