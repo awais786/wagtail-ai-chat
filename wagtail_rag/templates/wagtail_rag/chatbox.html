@@ -217,8 +217,22 @@
         const userInput = document.getElementById('userInput');
         const sendButton = document.getElementById('sendButton');
 
-        const HISTORY_WINDOW = 6;
-        const conversation = [];
+        const SESSION_KEY = 'ragChatSessionId';
+        let sessionId = sessionStorage.getItem(SESSION_KEY);
+
+        function generateSessionId() {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return window.crypto.randomUUID();
+            }
+            return `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        }
+
+        function ensureSessionId() {
+            if (!sessionId) {
+                sessionId = generateSessionId();
+                sessionStorage.setItem(SESSION_KEY, sessionId);
+            }
+        }
 
         // Send message
         function sendMessage() {
@@ -229,9 +243,10 @@
             const emptyState = messagesContainer.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
 
+            ensureSessionId();
+
             // Add user message
             addMessage(query, 'user');
-            conversation.push({ role: 'user', content: query });
 
             // Clear input and disable button
             userInput.value = '';
@@ -279,10 +294,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        question,
-                        history: conversation.slice(-HISTORY_WINDOW),
-                    })
+                    body: JSON.stringify({ question, session_id: sessionId })
                 });
 
                 const data = await response.json();
@@ -291,8 +303,12 @@
                     throw new Error(data.error || 'Failed to get response');
                 }
 
+                if (data.session_id) {
+                    sessionId = data.session_id;
+                    sessionStorage.setItem(SESSION_KEY, sessionId);
+                }
+
                 addMessage(data.answer, 'bot', { sources: data.sources });
-                conversation.push({ role: 'assistant', content: data.answer });
             } catch (error) {
                 addMessage(`Error: ${error.message}`, 'bot');
                 const errorDiv = messagesContainer.querySelector('.message.bot:last-child .message-content');

@@ -5,6 +5,7 @@ This module provides API endpoints for querying the RAG chatbot.
 """
 import json
 import logging
+import uuid
 from typing import Optional
 
 from django.conf import settings
@@ -42,10 +43,7 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
         "question": "What types of bread do you have?",
         "filter": {"model": "BreadPage"},  # optional metadata filter
         "llm_kwargs": {"temperature": 0.7},  # optional LLM-specific parameters
-        "history": [
-            {"role": "user", "content": "What content is available?"},
-            {"role": "assistant", "content": "Here are the available pages..."}
-        ]
+        "session_id": "abc123"  # optional session identifier for chat history
     }
 
     Note: LLM provider and model come from Django settings (WAGTAIL_RAG_LLM_PROVIDER, WAGTAIL_RAG_MODEL_NAME)
@@ -53,13 +51,18 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
     Returns:
     {
         "answer": "...",
-        "sources": [...]
+        "sources": [...],
+        "session_id": "..."  # included when chat history is enabled
     }
     """
     try:
+        use_chat_history = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
+        session_id = None
+
         if request.method == "GET":
             question = (request.GET.get("q") or "").strip()
             filter_str = request.GET.get("filter", "")
+            session_id = (request.GET.get("session_id") or "").strip() or None
             metadata_filter: Optional[dict] = None
             if filter_str:
                 try:
@@ -83,16 +86,19 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
                 data = json.loads(body)
             except json.JSONDecodeError as e:
                 return JsonResponse({"error": f"Invalid JSON: {e}"}, status=400)
-        question = (data.get("question") or "").strip()
-        metadata_filter = data.get("filter")
-        llm_kwargs = data.get("llm_kwargs") or {}
-        chat_history = data.get("history") if isinstance(data.get("history"), list) else []
+            question = (data.get("question") or "").strip()
+            metadata_filter = data.get("filter")
+            llm_kwargs = data.get("llm_kwargs") or {}
+            session_id = (data.get("session_id") or "").strip() or None
 
         if not question:
             return JsonResponse(
                 {"error": "Question is required. Use 'q' for GET or 'question' for POST."},
                 status=400,
             )
+
+        if use_chat_history and not session_id:
+            session_id = uuid.uuid4().hex
 
         llm_provider = getattr(settings, "WAGTAIL_RAG_LLM_PROVIDER", "ollama")
         llm_model = getattr(settings, "WAGTAIL_RAG_MODEL_NAME", None) or "default"
@@ -105,7 +111,10 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
         )
 
         chatbot = get_chatbot(metadata_filter=metadata_filter, llm_kwargs=llm_kwargs)
-        result = chatbot.query(question, chat_history=chat_history)
+        result = chatbot.query(question, session_id=session_id)
+
+        if use_chat_history and session_id:
+            result["session_id"] = session_id
 
         return JsonResponse(result)
 
