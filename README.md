@@ -5,29 +5,29 @@ A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. Th
 ## Features
 
 ### Universal Compatibility
-- 🔌 **Plug-and-Play**: Works with **any Wagtail site** - no model-specific configuration required
-- 🎯 **Smart Field Detection**: Automatically discovers and extracts content from any page model
-- 🏗️ **Zero Assumptions**: No hardcoded field names or page type checks - works with custom models out-of-the-box
-- ⚙️ **Fully Configurable**: Customize field patterns and extraction behavior via Django settings (optional)
+- **Plug-and-Play**: Works with **any Wagtail site** - no model-specific configuration required
+- **Smart Field Detection**: Automatically discovers and extracts content from any page model
+- **Zero Assumptions**: No hardcoded field names or page type checks - works with custom models out-of-the-box
+- **Fully Configurable**: Customize field patterns and extraction behavior via Django settings (optional)
 
 ### Content Extraction
-- 📝 **Adaptive Chunking**: Small pages stay whole, large pages are intelligently chunked
-- 🌳 **Multi-StreamField Support**: Handles multiple StreamFields per page (e.g., `body` + `backstory`)
-- 📄 **Rich Content**: Extracts from StreamField, RichTextField, TextField, and all standard Django fields
-- 🔗 **Relationships**: Includes ForeignKey and ManyToMany field values in metadata
-- 💬 **Natural Language**: Creates narrative-style documents for better LLM comprehension
+- **Adaptive Chunking**: Small pages stay whole, large pages are intelligently chunked
+- **Multi-StreamField Support**: Handles multiple StreamFields per page (e.g., `body` + `backstory`)
+- **Rich Content**: Extracts from StreamField, RichTextField, TextField, and all standard Django fields
+- **Relationships**: Includes ForeignKey and ManyToMany field values in metadata
+- **Natural Language**: Creates narrative-style documents for better LLM comprehension
 
 ### RAG & Search
-- 🔍 **Hybrid Retrieval**: Combines vector similarity search with Wagtail's full-text search (optional)
-- 🎭 **MultiQuery Retriever**: Uses LangChain's MultiQueryRetriever for query expansion (optional)
-- 🏆 **Title-Based Boosting**: Prioritizes documents with matching titles for better relevance
-- 🏷️ **Metadata Filtering**: Filter results by page model, app, or custom metadata
-- 🆔 **Deterministic IDs**: Enables efficient updates and single-page re-indexing
+- **Hybrid Retrieval**: Combines vector similarity search with Wagtail's full-text search (optional)
+- **MultiQuery Retriever**: Uses LangChain's MultiQueryRetriever for query expansion (optional)
+- **Title-Based Boosting**: Prioritizes documents with matching titles for better relevance
+- **Metadata Filtering**: Filter results by page model, app, or custom metadata
+- **Deterministic IDs**: Enables efficient updates and single-page re-indexing
 
 ### Provider Flexibility
-- 🤖 **Multiple LLM Providers**: Built-in support for **Ollama** (local), **OpenAI**, and **Anthropic** (hosted)
-- 🧠 **Multiple Embedding Providers**: Support for OpenAI, HuggingFace, and Sentence Transformers
-- 💾 **Multiple Vector Stores**: Support for FAISS (default) and ChromaDB
+- **Multiple LLM Providers**: Built-in support for **Ollama** (local), **OpenAI**, and **Anthropic** (hosted)
+- **Multiple Embedding Providers**: Support for OpenAI, HuggingFace, and Sentence Transformers
+- **Multiple Vector Stores**: Support for FAISS (default) and ChromaDB
 
 ## Installation
 
