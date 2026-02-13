@@ -190,8 +190,13 @@ class Command(BaseCommand):
                         self.stdout.write(self.style.SUCCESS('Session cleared (history disabled)\n'))
                     continue
 
-                if question.lower().startswith('sources '):
-                    toggle = question.lower().split()[1]
+                # Handle sources toggle command
+                parts = question.lower().split()
+                if parts and parts[0] == 'sources':
+                    if len(parts) < 2:
+                        self.stdout.write(self.style.ERROR('Usage: sources on|off\n'))
+                        continue
+                    toggle = parts[1]
                     if toggle == 'on':
                         show_sources = True
                         self.stdout.write(self.style.SUCCESS('Sources display: ON\n'))
