@@ -5,7 +5,7 @@ Tests for hybrid search functionality.
 import unittest
 from unittest.mock import MagicMock, patch
 
-from wagtail_rag.embeddings.search import hybrid_search
+from wagtail_rag.embeddings.search import EmbeddingSearcher
 
 
 class TestHybridSearch(unittest.TestCase):
@@ -19,14 +19,13 @@ class TestHybridSearch(unittest.TestCase):
         mock_settings.WAGTAIL_RAG_ENABLE_HYBRID_SEARCH = True
         mock_settings.WAGTAIL_RAG_MAX_RESULTS = 5
 
-        # Mock vector store
+        # Mock vector store and retriever
         mock_vector_doc = MagicMock()
         mock_vector_doc.page_content = "Vector content"
         mock_vector_doc.metadata = {"page_id": 1, "title": "Test"}
         mock_vector_store = MagicMock()
-        mock_vector_store.similarity_search_with_score.return_value = [
-            (mock_vector_doc, 0.9)
-        ]
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = [mock_vector_doc]
 
         # Mock page model
         mock_page = MagicMock()
@@ -36,11 +35,14 @@ class TestHybridSearch(unittest.TestCase):
         mock_page_model = MagicMock()
         mock_page_model.objects.live.return_value.search.return_value = [mock_page]
 
-        results = hybrid_search(
-            query="test query",
-            vector_store=mock_vector_store,
-            page_model=mock_page_model,
+        searcher = EmbeddingSearcher(
+            vectorstore=mock_vector_store,
+            retriever=mock_retriever,
+            k_value=5,
+            use_hybrid_search=True,
         )
+
+        results = searcher.retrieve_with_embeddings(query="test query")
 
         self.assertIsInstance(results, list)
         # Should have results from at least one source
@@ -56,17 +58,21 @@ class TestHybridSearch(unittest.TestCase):
         mock_vector_doc.page_content = "Vector content"
         mock_vector_doc.metadata = {"page_id": 1}
         mock_vector_store = MagicMock()
-        mock_vector_store.similarity_search.return_value = [mock_vector_doc]
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = [mock_vector_doc]
 
-        results = hybrid_search(
-            query="test query",
-            vector_store=mock_vector_store,
-            page_model=None,  # Not needed when hybrid is disabled
+        searcher = EmbeddingSearcher(
+            vectorstore=mock_vector_store,
+            retriever=mock_retriever,
+            k_value=5,
+            use_hybrid_search=False,
         )
 
+        results = searcher.retrieve_with_embeddings(query="test query")
+
         self.assertIsInstance(results, list)
-        # Verify vector_store was called
-        mock_vector_store.similarity_search.assert_called_once()
+        # Verify retriever was called
+        mock_retriever.invoke.assert_called_once()
 
     def test_hybrid_search_deduplication(self):
         """Test that duplicate results are properly deduplicated."""
@@ -86,19 +92,20 @@ class TestHybridSearch(unittest.TestCase):
             mock_vector_doc2.metadata = {"page_id": 1, "title": "Test"}  # Duplicate
 
             mock_vector_store = MagicMock()
-            mock_vector_store.similarity_search_with_score.return_value = [
-                (mock_vector_doc1, 0.9),
-                (mock_vector_doc2, 0.8),
-            ]
+            mock_retriever = MagicMock()
+            mock_retriever.invoke.return_value = [mock_vector_doc1, mock_vector_doc2]
 
             mock_page_model = MagicMock()
             mock_page_model.objects.live.return_value.search.return_value = []
 
-            results = hybrid_search(
-                query="test query",
-                vector_store=mock_vector_store,
-                page_model=mock_page_model,
+            searcher = EmbeddingSearcher(
+                vectorstore=mock_vector_store,
+                retriever=mock_retriever,
+                k_value=10,
+                use_hybrid_search=True,
             )
+
+            results = searcher.retrieve_with_embeddings(query="test query")
 
             # Should deduplicate and only return 1 result
             page_ids = [doc.metadata.get("page_id") for doc in results]

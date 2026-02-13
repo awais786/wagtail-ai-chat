@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase, RequestFactory
 from django.conf import settings
 
-from wagtail_rag.views import chat_api
+from wagtail_rag.views import rag_chat_api
 
 
 class TestChatAPI(TestCase):
@@ -33,7 +33,7 @@ class TestChatAPI(TestCase):
             content_type="application/json",
         )
 
-        response = chat_api(request)
+        response = rag_chat_api(request)
 
         self.assertEqual(response.status_code, 200)
         data = json.loads(response.content)
@@ -47,7 +47,7 @@ class TestChatAPI(TestCase):
             "/api/rag/chat/", data=json.dumps({}), content_type="application/json"
         )
 
-        response = chat_api(request)
+        response = rag_chat_api(request)
 
         self.assertEqual(response.status_code, 400)
         data = json.loads(response.content)
@@ -61,7 +61,7 @@ class TestChatAPI(TestCase):
             content_type="application/json",
         )
 
-        response = chat_api(request)
+        response = rag_chat_api(request)
 
         self.assertEqual(response.status_code, 400)
         data = json.loads(response.content)
@@ -73,18 +73,19 @@ class TestChatAPI(TestCase):
             "/api/rag/chat/", data="invalid json", content_type="application/json"
         )
 
-        response = chat_api(request)
+        response = rag_chat_api(request)
 
         self.assertEqual(response.status_code, 400)
         data = json.loads(response.content)
         self.assertIn("error", data)
 
-    def test_chat_api_get_method_not_allowed(self):
-        """Test chat API rejects GET requests."""
-        request = self.factory.get("/api/rag/chat/")
-        response = chat_api(request)
+    def test_chat_api_get_method_allowed(self):
+        """Test chat API allows GET requests."""
+        request = self.factory.get("/api/rag/chat/?q=test+question")
+        response = rag_chat_api(request)
 
-        self.assertEqual(response.status_code, 405)
+        # Should not return 405 since GET is allowed
+        self.assertNotEqual(response.status_code, 405)
 
     @patch("wagtail_rag.views.get_chatbot")
     def test_chat_api_with_session_id(self, mock_get_chatbot):
@@ -101,7 +102,7 @@ class TestChatAPI(TestCase):
             content_type="application/json",
         )
 
-        response = chat_api(request)
+        response = rag_chat_api(request)
 
         self.assertEqual(response.status_code, 200)
         # Verify session_id was passed to query
@@ -123,7 +124,7 @@ class TestChatAPI(TestCase):
             content_type="application/json",
         )
 
-        response = chat_api(request)
+        response = rag_chat_api(request)
 
         self.assertEqual(response.status_code, 200)
         # Verify metadata_filter was used when creating chatbot
@@ -143,7 +144,7 @@ class TestChatAPI(TestCase):
             content_type="application/json",
         )
 
-        response = chat_api(request)
+        response = rag_chat_api(request)
 
         self.assertEqual(response.status_code, 500)
         data = json.loads(response.content)
