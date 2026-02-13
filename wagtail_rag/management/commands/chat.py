@@ -46,7 +46,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         # Display configuration
-        self._display_config()
+        self._display_config(options)
 
         # Parse metadata filter if provided
         metadata_filter = None
@@ -55,6 +55,9 @@ class Command(BaseCommand):
                 metadata_filter = json.loads(options['filter'])
             except json.JSONDecodeError as e:
                 self.stdout.write(self.style.ERROR(f'Invalid JSON filter: {e}'))
+                return
+            if not isinstance(metadata_filter, dict):
+                self.stdout.write(self.style.ERROR('Invalid filter: expected a JSON object (e.g. {"model": "BlogPage"})'))
                 return
 
         # Initialize chatbot (uses Django settings)
@@ -87,8 +90,8 @@ class Command(BaseCommand):
             options['no_sources']
         )
 
-    def _display_config(self):
-        """Display current configuration from Django settings."""
+    def _display_config(self, options):
+        """Display effective configuration from Django settings and CLI flags."""
         self.stdout.write('=' * 70)
         self.stdout.write(self.style.SUCCESS('Wagtail RAG Chatbot - Command Line Interface'))
         self.stdout.write('=' * 70)
@@ -114,12 +117,25 @@ class Command(BaseCommand):
         retrieve_k = getattr(settings, 'WAGTAIL_RAG_RETRIEVE_K', 8)
         self.stdout.write(f'Retrieval: k={retrieve_k}, hybrid={use_hybrid}, multi_query={use_multi_query}')
 
-        # Chat history
-        enable_history = getattr(settings, 'WAGTAIL_RAG_ENABLE_CHAT_HISTORY', True)
-        if enable_history:
+        # Effective chat history mode
+        history_enabled_in_settings = getattr(settings, 'WAGTAIL_RAG_ENABLE_CHAT_HISTORY', True)
+        effective_history = history_enabled_in_settings and not options.get('no_history', False)
+        if effective_history:
             self.stdout.write('Chat History: enabled')
-        else:
+        elif not history_enabled_in_settings:
             self.stdout.write('Chat History: disabled in settings')
+        else:
+            self.stdout.write('Chat History: disabled by --no-history')
+
+        # Effective source display mode
+        if options.get('no_sources', False):
+            self.stdout.write('Sources Display: disabled by --no-sources')
+        else:
+            self.stdout.write('Sources Display: enabled')
+
+        # Metadata filter
+        if options.get('filter'):
+            self.stdout.write(f'Filter: {options["filter"]}')
 
         self.stdout.write('=' * 70)
         self.stdout.write('')
@@ -193,7 +209,7 @@ class Command(BaseCommand):
                 # Handle sources toggle command
                 parts = question.lower().split()
                 if parts and parts[0] == 'sources':
-                    if len(parts) < 2:
+                    if len(parts) != 2:
                         self.stdout.write(self.style.ERROR('Usage: sources on|off\n'))
                         continue
                     toggle = parts[1]
@@ -244,7 +260,7 @@ class Command(BaseCommand):
             title = metadata.get('title', 'Unknown')
             url = metadata.get('url', '')
             model = metadata.get('model', '')
-            content_preview = source.get('content', '')[:150]
+            content_preview = " ".join(source.get('content', '').split())[:150]
 
             self.stdout.write(f'  {i}. {title}')
             if model:
