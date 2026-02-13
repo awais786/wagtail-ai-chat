@@ -37,7 +37,15 @@ class TestChatCommand(TestCase):
 
         # Valid JSON filter
         out = StringIO()
-        call_command("chat", "-q", "test", "--filter", '{"model": "BlogPage"}', "--no-sources", stdout=out)
+        call_command(
+            "chat",
+            "-q",
+            "test",
+            "--filter",
+            '{"model": "BlogPage"}',
+            "--no-sources",
+            stdout=out,
+        )
         call_args = mock_get_chatbot.call_args
         self.assertEqual(call_args[1]["metadata_filter"], {"model": "BlogPage"})
 
@@ -45,11 +53,13 @@ class TestChatCommand(TestCase):
         out = StringIO()
         with self.assertRaises(SystemExit):
             call_command("chat", "-q", "test", "--filter", "invalid-json", stdout=out)
-        
+
         # Non-dict JSON filter
         out = StringIO()
         with self.assertRaises(SystemExit):
-            call_command("chat", "-q", "test", "--filter", '["not", "a", "dict"]', stdout=out)
+            call_command(
+                "chat", "-q", "test", "--filter", '["not", "a", "dict"]', stdout=out
+            )
 
 
 if __name__ == "__main__":

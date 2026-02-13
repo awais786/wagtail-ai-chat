@@ -47,7 +47,7 @@ class TestChatAPI(TestCase):
         )
         response = rag_chat_api(request)
         self.assertEqual(response.status_code, 400)
-        
+
         # Empty question
         request = self.factory.post(
             "/api/rag/chat/",
@@ -56,7 +56,7 @@ class TestChatAPI(TestCase):
         )
         response = rag_chat_api(request)
         self.assertEqual(response.status_code, 400)
-        
+
         # Invalid JSON
         request = self.factory.post(
             "/api/rag/chat/", data="invalid json", content_type="application/json"
@@ -73,16 +73,18 @@ class TestChatAPI(TestCase):
 
         request = self.factory.post(
             "/api/rag/chat/",
-            data=json.dumps({
-                "question": "test question",
-                "session_id": "test-session-123",
-                "filter": {"model": "BlogPage"}
-            }),
+            data=json.dumps(
+                {
+                    "question": "test question",
+                    "session_id": "test-session-123",
+                    "filter": {"model": "BlogPage"},
+                }
+            ),
             content_type="application/json",
         )
 
         response = rag_chat_api(request)
-        
+
         self.assertEqual(response.status_code, 200)
         # Verify session_id passed to query
         call_kwargs = mock_chatbot.query.call_args[1]
@@ -105,7 +107,7 @@ class TestChatAPI(TestCase):
         )
 
         response = rag_chat_api(request)
-        
+
         self.assertEqual(response.status_code, 500)
         data = json.loads(response.content)
         self.assertIn("error", data)

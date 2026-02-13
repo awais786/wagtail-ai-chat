@@ -19,18 +19,18 @@ class TestIndexBuilder(unittest.TestCase):
         # With :* suffix
         model_names = ["blog.BlogPage", "breads.BreadPage:*", "locations.LocationPage"]
         cleaned, auto_fields = _parse_model_fields_shorthand(model_names)
-        
+
         self.assertEqual(len(cleaned), 3)
         self.assertIn("breads.BreadPage", cleaned)
         self.assertIsNotNone(auto_fields)
         self.assertIn("breads.BreadPage:*", auto_fields)
-        
+
         # Without :* suffix
         model_names = ["blog.BlogPage", "breads.BreadPage"]
         cleaned, auto_fields = _parse_model_fields_shorthand(model_names)
         self.assertEqual(len(cleaned), 2)
         self.assertIsNone(auto_fields)
-        
+
         # Empty input
         cleaned, auto_fields = _parse_model_fields_shorthand(None)
         self.assertEqual(cleaned, [])
@@ -43,11 +43,11 @@ class TestIndexBuilder(unittest.TestCase):
         field1, field2 = MagicMock(), MagicMock()
         field1.name, field2.name = "body", "intro"
         page.api_fields = [field1, field2]
-        
+
         fields, source = _get_fields_to_attempt(page)
         self.assertEqual(fields, ["body", "intro"])
         self.assertEqual(source, "model api_fields")
-        
+
         # Fallback to defaults
         page.api_fields = []
         fields, source = _get_fields_to_attempt(page)

@@ -21,13 +21,13 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
         # Explicit takes precedence
         result = self.factory._resolve_model_name("openai", "custom-model")
         self.assertEqual(result, "custom-model")
-        
+
         # Provider-specific setting
         self.mock_settings.WAGTAIL_RAG_EMBEDDING_MODEL = "global-model"
         self.mock_settings.WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL = "openai-specific"
         result = self.factory._resolve_setting_model_name("openai")
         self.assertEqual(result, "openai-specific")
-        
+
         # Incompatible model falls back to default
         self.mock_settings.WAGTAIL_RAG_EMBEDDING_MODEL = "incompatible-model"
         self.mock_settings.WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL = None
@@ -37,12 +37,24 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
     def test_model_compatibility_detection(self):
         """Test model compatibility detection for different providers."""
         # OpenAI models
-        self.assertTrue(self.factory._is_model_compatible("openai", "text-embedding-3-small"))
-        self.assertFalse(self.factory._is_model_compatible("openai", "sentence-transformers/all-MiniLM-L6-v2"))
-        
+        self.assertTrue(
+            self.factory._is_model_compatible("openai", "text-embedding-3-small")
+        )
+        self.assertFalse(
+            self.factory._is_model_compatible(
+                "openai", "sentence-transformers/all-MiniLM-L6-v2"
+            )
+        )
+
         # HuggingFace models
-        self.assertTrue(self.factory._is_model_compatible("huggingface", "sentence-transformers/all-MiniLM-L6-v2"))
-        self.assertFalse(self.factory._is_model_compatible("huggingface", "text-embedding-3-small"))
+        self.assertTrue(
+            self.factory._is_model_compatible(
+                "huggingface", "sentence-transformers/all-MiniLM-L6-v2"
+            )
+        )
+        self.assertFalse(
+            self.factory._is_model_compatible("huggingface", "text-embedding-3-small")
+        )
 
     def test_invalid_provider_error(self):
         """Test that invalid provider raises clear error."""
@@ -63,7 +75,7 @@ class TestLLMProviderFactory(unittest.TestCase):
         # Explicit precedence
         result = self.factory._resolve_model_name("openai", "custom-model")
         self.assertEqual(result, "custom-model")
-        
+
         # Provider-specific setting
         self.mock_settings.WAGTAIL_RAG_MODEL_NAME = "global-model"
         self.mock_settings.WAGTAIL_RAG_OPENAI_MODEL_NAME = "openai-specific"
@@ -75,11 +87,13 @@ class TestLLMProviderFactory(unittest.TestCase):
         # OpenAI
         self.assertTrue(self.factory._is_model_compatible("openai", "gpt-4"))
         self.assertFalse(self.factory._is_model_compatible("openai", "claude-3-sonnet"))
-        
+
         # Anthropic
-        self.assertTrue(self.factory._is_model_compatible("anthropic", "claude-3-sonnet-20240229"))
+        self.assertTrue(
+            self.factory._is_model_compatible("anthropic", "claude-3-sonnet-20240229")
+        )
         self.assertFalse(self.factory._is_model_compatible("anthropic", "gpt-4"))
-        
+
         # Ollama
         self.assertTrue(self.factory._is_model_compatible("ollama", "mistral"))
         self.assertFalse(self.factory._is_model_compatible("ollama", "gpt-4"))
