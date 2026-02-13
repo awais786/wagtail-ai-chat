@@ -1,0 +1,64 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11']
+        django-version: ['5.2']
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install Django==${{ matrix.django-version }}
+        pip install wagtail
+        pip install -e ".[test,local]"
+
+    - name: Run tests
+      run: |
+        pytest --cov=wagtail_rag --cov-report=xml --cov-report=term
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black flake8
+    
+    - name: Check formatting with black
+      run: |
+        black --check wagtail_rag
+    
+    - name: Lint with flake8
+      run: |
+        flake8 wagtail_rag --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 wagtail_rag --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics

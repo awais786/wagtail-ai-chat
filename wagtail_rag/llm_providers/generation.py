@@ -4,6 +4,7 @@ LLM Generation Module for RAG Chatbot.
 This module handles all LLM (Large Language Model) generation functionality,
 including prompt construction, chain execution, and answer generation.
 """
+
 from __future__ import annotations
 
 import logging
@@ -21,6 +22,7 @@ try:
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain_core.runnables import RunnablePassthrough
     from langchain_core.output_parsers import StrOutputParser
+
     try:
         from langchain_core.runnables import RunnableWithMessageHistory
     except Exception:
@@ -36,15 +38,25 @@ except Exception:
 
 try:
     from langchain_core.messages import HumanMessage
+
     HUMAN_MESSAGE_AVAILABLE = True
 except Exception:
     HumanMessage = None
     HUMAN_MESSAGE_AVAILABLE = False
 
 try:
+    from langchain_core.language_models.chat_models import BaseChatModel
+
+    BASE_CHAT_MODEL_AVAILABLE = True
+except Exception:
+    BaseChatModel = None
+    BASE_CHAT_MODEL_AVAILABLE = False
+
+try:
     # Legacy LangChain interfaces
     from langchain.prompts import PromptTemplate
     from langchain.chains import RetrievalQA
+
     LEGACY_AVAILABLE = True
 except Exception:
     PromptTemplate = None
@@ -73,7 +85,9 @@ class LLMGenerator:
         self.retriever = retriever
         self.prompt_template_str = self._get_prompt_template()
         self.system_prompt_str = self._get_system_prompt()
-        self.history_enabled = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
+        self.history_enabled = getattr(
+            settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True
+        )
         self.history_recent_window = int(
             getattr(settings, "WAGTAIL_RAG_CHAT_HISTORY_RECENT_MESSAGES", 6)
         )
@@ -130,7 +144,9 @@ class LLMGenerator:
             try:
                 return self._create_lcel_chain()
             except Exception:
-                logger.exception("Failed to create LCEL QA chain; falling back to legacy if available")
+                logger.exception(
+                    "Failed to create LCEL QA chain; falling back to legacy if available"
+                )
 
         if LEGACY_AVAILABLE:
             try:
@@ -178,7 +194,9 @@ class LLMGenerator:
 
         prompt = ChatPromptTemplate.from_template(self.prompt_template_str)  # type: ignore[attr-defined]
 
-        def format_docs(docs: List[Any]) -> str:  # simple formatter used in runnable composition
+        def format_docs(
+            docs: List[Any],
+        ) -> str:  # simple formatter used in runnable composition
             return "\n\n".join(getattr(d, "page_content", "") for d in docs)
 
         # Compose runnables: retriever -> format_docs -> prompt -> llm -> parser
@@ -211,6 +229,8 @@ class LLMGenerator:
         context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
         max_context_chars = int(getattr(settings, "WAGTAIL_RAG_MAX_CONTEXT_CHARS", 0))
         if max_context_chars and len(context) > max_context_chars:
+            if max_context_chars <= 3:
+                return context[:max_context_chars]
             context = context[: max_context_chars - 3] + "..."
         return context
 
@@ -227,11 +247,15 @@ class LLMGenerator:
         )
 
     def _is_chat_model(self) -> bool:
+        if (
+            BASE_CHAT_MODEL_AVAILABLE
+            and BaseChatModel
+            and isinstance(self.llm, BaseChatModel)
+        ):
+            return True
         return (
-            hasattr(self.llm, '__class__') and 'Chat' in self.llm.__class__.__name__
-        ) or (
-            hasattr(self.llm, 'invoke') and not hasattr(self.llm, 'generate')
-        )
+            hasattr(self.llm, "__class__") and "Chat" in self.llm.__class__.__name__
+        ) or (hasattr(self.llm, "invoke") and not hasattr(self.llm, "generate"))
 
     def _summarize_history(self, summary: str, new_messages_text: str) -> str:
         """Summarize older history turns to keep context compact."""
@@ -258,7 +282,7 @@ class LLMGenerator:
     @staticmethod
     def _extract_text_from_result(result: Any) -> str:
         """Extract text content from various LLM response formats."""
-        if hasattr(result, 'content'):
+        if hasattr(result, "content"):
             return str(result.content)
         if isinstance(result, str):
             return result
@@ -274,14 +298,14 @@ class LLMGenerator:
                 return self._extract_text_from_result(result)
             except Exception as e:
                 logger.debug("HumanMessage invoke failed: %s", e)
-        
+
         # Try direct string invoke
         try:
             result = self.llm.invoke(prompt_text)
             return self._extract_text_from_result(result)
         except Exception as e:
             logger.debug("Direct string invoke failed: %s", e)
-        
+
         # Try dict format as last resort
         try:
             result = self.llm.invoke({"role": "user", "content": prompt_text})
@@ -297,21 +321,20 @@ class LLMGenerator:
             return str(self.llm(prompt_text))
         except (TypeError, AttributeError) as e:
             logger.debug("Direct call failed: %s", e)
-        
+
         # Try invoke method
         try:
             result = self.llm.invoke(prompt_text)
             return self._extract_text_from_result(result)
         except Exception as e:
             logger.debug("Invoke method failed: %s", e)
-        
+
         # Try generate method (legacy LangChain)
         try:
             return str(self.llm.generate([prompt_text]).generations[0][0].text)
         except Exception:
             logger.exception("All regular LLM invocation methods failed")
             raise
-
 
     def generate_answer_with_llm(
         self,
@@ -326,11 +349,13 @@ class LLMGenerator:
         """
         context = self._get_context_from_docs(docs)
         input_text = f"Context:\n{context}\n\nQuestion:\n{question}"
-        prompt_text = self.prompt_template_str.format(context=context, question=question)
-        
+        prompt_text = self.prompt_template_str.format(
+            context=context, question=question
+        )
+
         # Detect if this is a chat model (expects messages, not plain strings)
         is_chat_model = self._is_chat_model()
-        
+
         if is_chat_model and self.history_chain and session_id:
             result = self.history_chain.invoke(
                 {"input": input_text},
@@ -382,23 +407,23 @@ class LLMGenerator:
             # Normalize output to a string
             if isinstance(out, str):
                 return out
-            
+
             if isinstance(out, dict):
                 # Try common output keys
                 for key in ("output", "text", "result", "answer"):
                     if key in out and isinstance(out[key], str):
                         return out[key]
-            
+
             # Try object attributes
             for attr in ("text", "output", "content"):
                 if hasattr(out, attr):
                     val = getattr(out, attr)
                     if isinstance(val, str):
                         return val
-            
+
             if out is None:
                 raise RuntimeError("LCEL chain produced no output")
-            
+
             # Last resort: stringify
             return str(out)
 
@@ -435,7 +460,9 @@ class LLMGenerator:
             if hasattr(self.qa_chain, "invoke"):
                 out = self.qa_chain.invoke(question)
                 if isinstance(out, dict):
-                    return out.get("source_documents", []) or out.get("source", []) or []
+                    return (
+                        out.get("source_documents", []) or out.get("source", []) or []
+                    )
                 # Some LCEL runnables return an object with a 'source_documents' attribute
                 if hasattr(out, "source_documents"):
                     return getattr(out, "source_documents") or []

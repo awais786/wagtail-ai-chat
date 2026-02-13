@@ -38,9 +38,18 @@ A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. Th
 pip install git+https://github.com/awais786/wagtail-ai-chat.git
 ```
 
+**From GitHub with extras (no clone):**
+```bash
+# HuggingFace embeddings only
+pip install "wagtail-rag[huggingface] @ git+https://github.com/awais786/wagtail-ai-chat.git"
+
+# HuggingFace + Ollama
+pip install "wagtail-rag[huggingface,ollama] @ git+https://github.com/awais786/wagtail-ai-chat.git"
+```
+
 **From source (local checkout):**
 ```bash
-cd wagtail_rag
+cd wagtail-ai-chat
 pip install -e .
 ```
 
@@ -56,53 +65,42 @@ INSTALLED_APPS = [
 
 ### 3. Install Provider Dependencies
 
-**Install only the providers you need:**
+Install only what you need:
 
-**For local setup (HuggingFace embeddings + Ollama LLM):**
 ```bash
-pip install wagtail-rag[local]
-# Or: pip install wagtail-rag[huggingface,ollama]
-# Or separately: pip install langchain-huggingface sentence-transformers ollama
+# Local (recommended): HuggingFace embeddings + Ollama LLM
+pip install "wagtail-rag[local]"
+
+# HuggingFace embeddings only
+pip install "wagtail-rag[huggingface]"
+
+# OpenAI provider
+pip install "wagtail-rag[openai]"
+
+# Anthropic provider
+pip install "wagtail-rag[anthropic]"
+
+# All providers
+pip install "wagtail-rag[all]"
 ```
 
-**For HuggingFace embeddings only:**
-```bash
-pip install wagtail-rag[huggingface]
-# Or: pip install langchain-huggingface sentence-transformers
-```
-
-**For OpenAI (embeddings and/or LLM):**
-```bash
-pip install wagtail-rag[openai]
-# Or: pip install langchain-openai
-```
-
-**For Anthropic Claude LLM:**
-```bash
-pip install wagtail-rag[anthropic]
-# Or: pip install langchain-anthropic
-```
-
-**Install all providers (optional):**
-```bash
-pip install wagtail-rag[all]
-```
-
-**Note:** You can combine multiple providers in one command, e.g., `pip install wagtail-rag[huggingface,openai]`
-
-**Note:** Core dependencies (langchain, etc.) are automatically installed with the package. You need to install at least one vector store backend (FAISS or ChromaDB) and provider-specific dependencies.
+You can combine extras, for example: `pip install "wagtail-rag[huggingface,ollama]"`.
 
 ### 4. Add URL Configuration (Optional, for API endpoints)
 
 In your main `urls.py` (e.g., `bakerydemo/urls.py`):
 ```python
-# Import wagtail_rag URLs
-urlpatterns += [
+from django.urls import include, path
+from wagtail import urls as wagtail_urls
+
+urlpatterns = [
+    # ... your existing routes
     path("", include("wagtail_rag.urls")),
+    path("", include(wagtail_urls)),
 ]
 ```
 
-**Important**: Place `wagtail_rag_urls` before `wagtail_urls` so API routes are matched first.
+**Important**: Place `path("", include("wagtail_rag.urls"))` before `wagtail_urls` so API routes are matched first.
 
 After adding this, the API endpoint will be available at:
 - `http://localhost:8000/api/rag/chat/` - Chat endpoint (GET or POST)
@@ -141,7 +139,7 @@ WAGTAIL_RAG_MODEL_NAME = "mistral"
 
 # Embedding configuration
 WAGTAIL_RAG_EMBEDDING_PROVIDER = "openai"
-WAGTAIL_RAG_EMBEDDING_MODEL = "text-embedding-ada-002"
+WAGTAIL_RAG_EMBEDDING_MODEL = "text-embedding-3-small"
 
 # LLM configuration
 WAGTAIL_RAG_LLM_PROVIDER = "openai"
@@ -209,6 +207,18 @@ WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION = True
 
 # Enable/disable hybrid search (default: True)
 WAGTAIL_RAG_USE_HYBRID_SEARCH = True
+
+# Optional provider-specific model settings (recommended for multi-provider setups)
+# These take precedence over WAGTAIL_RAG_MODEL_NAME / WAGTAIL_RAG_EMBEDDING_MODEL
+WAGTAIL_RAG_OPENAI_MODEL_NAME = "gpt-4"
+WAGTAIL_RAG_ANTHROPIC_MODEL_NAME = "claude-3-sonnet-20240229"
+WAGTAIL_RAG_OLLAMA_MODEL_NAME = "mistral"
+WAGTAIL_RAG_HUGGINGFACE_MODEL_NAME = "google/flan-t5-base"
+
+WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+WAGTAIL_RAG_OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
+WAGTAIL_RAG_HUGGINGFACE_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
 ```
 
 ### API and Security
@@ -216,6 +226,12 @@ WAGTAIL_RAG_USE_HYBRID_SEARCH = True
 ```python
 # Max POST body size in bytes for the chat API (default: 1MB). Helps prevent DoS from huge payloads.
 WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE = 1024 * 1024
+
+# Max question length in characters (default: 0 = no limit). Returns 400 if exceeded.
+WAGTAIL_RAG_MAX_QUESTION_LENGTH = 0  # e.g. 4096 to cap question size
+
+# Max context length in characters when building the prompt (default: 0 = no limit). Truncates retrieved context to avoid exceeding model context window.
+WAGTAIL_RAG_MAX_CONTEXT_CHARS = 0  # e.g. 12000 to cap context size
 
 # Chat history (server-side with summarization of older turns)
 WAGTAIL_RAG_ENABLE_CHAT_HISTORY = True
@@ -253,66 +269,49 @@ WAGTAIL_RAG_CHUNK_OVERLAP = 200  # Overlap between chunks
 WAGTAIL_RAG_SKIP_IF_INDEXED = True
 # Remove stale documents for pages that have been deleted (default: True)
 WAGTAIL_RAG_PRUNE_DELETED = True
-# Use new extractor by default (SmartWagtailExtractor: adaptive chunking for any page)
-# Default True. Set False to use the original chunked extractor (page_to_documents) only.
-WAGTAIL_RAG_USE_NEW_EXTRACTOR = True
-# New extractor: chunk only when content exceeds this many characters (default 2000)
-WAGTAIL_RAG_NEW_EXTRACTOR_SIZE_THRESHOLD = 2000
-# New extractor: chunk large pages by section (title, intro, body, metadata) when True
-WAGTAIL_RAG_NEW_EXTRACTOR_CHUNK_BY_SECTION = True
 ```
 
-### Advanced Extractor Configuration (Optional)
+### Custom Prompt Templates (Optional)
 
-The new extractor (`SmartWagtailExtractor`) is **fully generic** and works with **any Wagtail site** without model-specific assumptions. It automatically detects field types and extracts content accordingly.
-
-**Default behavior works for most sites.** These settings are only needed for customization:
+The default prompts are optimized for accuracy and citation following RAG best practices. You can customize them if needed:
 
 ```python
-# Maximum items to extract from ManyToMany fields (default: 10)
-WAGTAIL_RAG_MAX_METADATA_ITEMS = 10
+# Main prompt template (used for single queries without chat history)
+WAGTAIL_RAG_PROMPT_TEMPLATE = """You are a knowledgeable assistant helping users find information from a Wagtail CMS website. Your goal is to provide accurate, helpful answers based strictly on the provided context.
 
-# Maximum length for text fields in metadata before truncation (default: 500)
-WAGTAIL_RAG_MAX_TEXT_FIELD_LENGTH = 500
+**Instructions:**
+1. Answer ONLY using information explicitly stated in the context below
+2. If the context contains the answer, provide a clear, well-structured response
+3. Cite the source page when providing information (e.g., "According to [Page Title]...")
+4. If the context does NOT contain enough information to answer the question, respond with: "I don't have enough information in the available content to answer that question."
+5. Be concise but complete - prioritize clarity over brevity
+6. If the question has multiple parts, address each part separately
+7. Do not make assumptions or add information not present in the context
 
-# Custom field name patterns for introduction/description fields
-# (default: ["introduction", "intro", "description", "summary", "excerpt", "lead", "standfirst"])
-WAGTAIL_RAG_INTRO_PATTERNS = ["introduction", "intro", "description", "excerpt"]
+**Context:**
+{context}
 
-# Custom field name patterns for main body/content fields
-# (default: ["body", "content", "main_content", "text", "streamfield", "page_body"])
-WAGTAIL_RAG_BODY_PATTERNS = ["body", "content", "main_content"]
+**Question:**
+{question}
 
-# Additional system fields to skip during extraction (optional)
-# Wagtail system fields are already skipped by default
-WAGTAIL_RAG_SKIP_FIELDS = {"custom_internal_field", "temp_data"}
+**Answer:**"""
+
+# System prompt (used for chat history sessions)
+WAGTAIL_RAG_SYSTEM_PROMPT = """You are a knowledgeable assistant for a Wagtail CMS website. Answer questions using ONLY the provided context. Always cite sources when available. If you cannot answer based on the context, clearly state "I don't have enough information to answer that question." Be accurate, concise, and helpful."""
 ```
 
-**How the extractor works generically:**
+**Why these prompts work better:**
+- **Clear Role Definition**: Establishes expertise in Wagtail CMS content
+- **Citation Requirements**: Instructs LLM to reference source pages
+- **Anti-Hallucination**: Explicit "I don't know" fallback reduces false information
+- **Structured Instructions**: Numbered guidelines for consistent behavior
+- **Metadata Awareness**: Leverages page titles and URLs from document metadata
 
-1. **Field Discovery**: Automatically finds intro, body, and metadata fields by field type and naming patterns
-2. **StreamFields**: Extracts ALL StreamFields (including non-body ones like `backstory` on RecipePage)
-3. **RichText**: Extracts plain text from RichTextField objects
-4. **Relationships**: Includes ForeignKey and ManyToMany field values
-5. **Narrative Structure**: Creates natural-language documents for better LLM understanding
-6. **No Model Assumptions**: Works with BlogPage, ProductPage, LocationPage, or any custom model
-
-**Example**: For a custom `EventPage` with fields `event_date`, `venue`, and `program` (StreamField), the extractor will automatically:
-- Extract `event_date` and `venue` as metadata
-- Extract `program` StreamField as body content
-- Create a document like: "Summer Festival. The event date is 2024-07-15. The venue is Central Park. [program content]"
-
-### Custom Prompt Template (Optional)
-
-```python
-WAGTAIL_RAG_PROMPT_TEMPLATE = """You are a helpful assistant. Use the following pieces of context from the website to answer the question accurately.
-
-Context: {context}
-
-Question: {question}
-
-Answer: """
-```
+**Customization Tips:**
+- Adjust tone: Replace "knowledgeable assistant" with "friendly guide" for casual sites
+- Add domain specifics: "You are an expert in [your domain]..."
+- Modify citation style: Change citation format to match your preference
+- Adjust verbosity: Change "concise but complete" to "brief" or "detailed"
 
 ## Usage
 
@@ -341,21 +340,57 @@ python manage.py build_rag_index --reset-only
 python manage.py build_rag_index
 ```
 
-### Comparing extractors (new vs chunked)
+### Interactive Chat from Command Line
 
-To compare the new extractor (SmartWagtailExtractor, default) with the original chunked extractor on a single page:
+Test the chatbot directly from the terminal with the `chat` management command:
 
+**Interactive Mode (chat session with history):**
 ```bash
-python manage.py compare_extractors --page-id 123
+# Start interactive chat
+python manage.py chat
+
+# Interactive mode with custom session ID
+python manage.py chat --session-id my-session
+
+# Interactive mode without chat history
+python manage.py chat --no-history
+
+# Hide sources in output
+python manage.py chat --no-sources
 ```
 
-Optional: write full comparison to JSON for diffing:
+In interactive mode, you can use these commands:
+- Type your question and press Enter
+- Type `exit` or `quit` to exit
+- Type `clear` to start a new chat session
+- Type `sources on` or `sources off` to toggle source display
+- Press `Ctrl+C` to exit
 
+**Single Question Mode (non-interactive):**
 ```bash
-python manage.py compare_extractors --page-id 123 --output /tmp/compare.json
+# Ask a single question and exit
+python manage.py chat -q "What types of bread do you have?"
+
+# Single question with metadata filter
+python manage.py chat -q "Tell me about recipes" --filter '{"model": "RecipePage"}'
+
+# Single question without sources
+python manage.py chat -q "What content is available?" --no-sources
 ```
 
-The new extractor is used by default. Set `WAGTAIL_RAG_USE_NEW_EXTRACTOR = False` in settings to use only the chunked extractor.
+**Additional Options:**
+```bash
+# Filter by page model
+python manage.py chat --filter '{"model": "BlogPage"}'
+
+# Without chat history (each question independent)
+python manage.py chat --no-history
+
+# Combine options
+python manage.py chat -q "About sourdough" --filter '{"model": "BreadPage"}' --no-sources
+```
+
+The command uses LLM and embedding settings from your Django `settings.py` and displays configuration info on startup (LLM provider, embedding model, vector store, search settings).
 
 ### Using the Chatbot in Python
 
@@ -451,7 +486,7 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
 
 1. **Indexing**: When you run `python manage.py build_rag_index`:
    - The command delegates to the shared index builder (`wagtail_rag.content_extraction.index_builder.build_rag_index`).
-   - The builder discovers Wagtail Page models from settings (`WAGTAIL_RAG_MODELS` or all page types), gets live pages, and for each page tries the **new extractor** (SmartWagtailExtractor) first by default. It converts pages to LangChain Document objects with adaptive chunking (small pages → one doc, large pages → chunked by section). If the new extractor returns nothing, it falls back to the **chunked extractor** (`wagtail_page_to_documents`: title, intro, chunked body with title context).
+   - The builder discovers Wagtail Page models from settings (`WAGTAIL_RAG_MODELS` or all page types), gets live pages, and extracts content using `api_fields_extractor` (api_fields first, then configured default fields, then auto-discovery fallback).
    - Each document gets metadata (page_id, page_type, slug, url, section, chunk_index, doc_id, etc.); the builder adds model-level metadata (source, model, app) and upserts chunks into the vector store (FAISS or ChromaDB) with deterministic IDs. Old chunks for a page are removed before re-indexing so updates stay consistent.
 
 2. **Querying**: The chatbot:
@@ -491,6 +526,10 @@ This error occurs when you specify a model name that doesn't match the provider 
 ```python
 WAGTAIL_RAG_LLM_PROVIDER = 'openai'
 WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
+
+# Better: use provider-specific model settings to avoid cross-provider mismatch
+WAGTAIL_RAG_OPENAI_MODEL_NAME = 'gpt-4'
+WAGTAIL_RAG_OLLAMA_MODEL_NAME = 'mistral'
 ```
 
 ### "No pages found to index"
@@ -514,34 +553,66 @@ WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
   - **Ollama**: `pip install wagtail-rag[ollama]`
   - **All providers**: `pip install wagtail-rag[all]`
 
+## Testing
+
+### Running Tests
+
+The package includes a comprehensive test suite covering core functionality.
+
+**Install test dependencies:**
+```bash
+pip install -e ".[test]"
+```
+
+**Run all tests:**
+```bash
+pytest
+```
+
+**Run with coverage:**
+```bash
+pytest --cov=wagtail_rag --cov-report=html --cov-report=term
+```
+
+**Run specific test modules:**
+```bash
+# Test providers
+pytest wagtail_rag/tests/test_providers.py
+
+# Test content extraction
+pytest wagtail_rag/tests/test_extraction.py
+
+# Test API views
+pytest wagtail_rag/tests/test_api_views.py
+
+# Test chat command
+pytest wagtail_rag/tests/test_chat_command.py
+```
+
+**Using tox (test across multiple Python versions):**
+```bash
+pip install tox
+tox
+```
+
+### Test Coverage
+
+The test suite includes:
+- **Provider factories**: LLM and embedding provider initialization, model resolution, compatibility checks
+- **Content extraction**: Field detection, metadata building, text cleaning
+- **LLM generation**: Prompt templates, context building, chat model detection
+- **Index building**: Field resolution, model parsing helpers
+- **API views**: Request validation, error handling, session management
+- **Chat command**: CLI argument parsing, filter validation, interactive mode
+- **Hybrid search**: Vector search, deduplication, hybrid weighting
+
 ## Requirements
 
-**Core Requirements** (installed automatically):
 - Python 3.8+
 - Django 3.2+
 - Wagtail 4.0+
-- FAISS
-- LangChain (core packages)
-
-**Provider Requirements** (install only what you need):
-
-**Embedding Providers:**
-- **HuggingFace** (default): `pip install wagtail-rag[huggingface]` or `pip install langchain-huggingface sentence-transformers`
-- **OpenAI**: `pip install wagtail-rag[openai]` or `pip install langchain-openai`
-
-**LLM Providers:**
-- **Ollama** (local): `pip install wagtail-rag[ollama]` or `pip install ollama`
-- **OpenAI**: `pip install wagtail-rag[openai]` or `pip install langchain-openai`
-- **Anthropic**: `pip install wagtail-rag[anthropic]` or `pip install langchain-anthropic`
-
-**Common combinations:**
-- **Local setup**: `pip install wagtail-rag[local]` (HuggingFace embeddings + Ollama LLM)
-- **OpenAI setup**: `pip install wagtail-rag[openai]` (OpenAI embeddings + LLM)
-
-**Install all providers at once:**
-```bash
-pip install wagtail-rag[all]
-```
+- LangChain core dependencies (installed automatically with this package)
+- At least one provider extra (see Installation step 3)
 
 ## Example Configuration
 
