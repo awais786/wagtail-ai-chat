@@ -492,9 +492,9 @@ def build_rag_index(
         os.path.join(settings.BASE_DIR, "chroma_db")
     )
     
-    _write(stdout, f"✓ Vector store: {backend.upper()}")
-    _write(stdout, f"✓ Collection: {collection}")
-    _write(stdout, f"✓ Storage path: {path}")
+    _write(stdout, f"Vector store: {backend.upper()}")
+    _write(stdout, f"Collection: {collection}")
+    _write(stdout, f"Storage path: {path}")
     
     # Initialize embeddings
     _write(stdout, "\nInitializing embeddings...")
@@ -502,18 +502,18 @@ def build_rag_index(
         provider=getattr(settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface"),
         model_name=getattr(settings, "WAGTAIL_RAG_EMBEDDING_MODEL", None),
     )
-    _write(stdout, "✓ Embeddings loaded")
+    _write(stdout, "Embeddings loaded")
     
     # Initialize vector store
     _write(stdout, "Initializing vector store...")
     store = ChromaStore(path=path, collection=collection, embeddings=embeddings, backend=backend)
-    _write(stdout, "✓ Vector store ready")
+    _write(stdout, "Vector store ready")
     
     # Handle reset-only mode
     if reset_only:
         _write(stdout, "\nResetting collection...")
         store.reset()
-        _write(stdout, f'✓ Collection "{collection}" cleared')
+        _write(stdout, f'Collection "{collection}" cleared')
         return
     
     # Step 2: Extract Documents
@@ -524,12 +524,12 @@ def build_rag_index(
     # Get page models to index
     models = get_page_models(include=model_names, exclude=exclude_models)
     if not models:
-        _write(stdout, "✗ No page models found")
+        _write(stdout, "ERROR: No page models found")
         return
     
-    _write(stdout, f"✓ Found {len(models)} model(s): {', '.join(f'{m._meta.app_label}.{m.__name__}' for m in models)}")
+    _write(stdout, f"Found {len(models)} model(s): {', '.join(f'{m._meta.app_label}.{m.__name__}' for m in models)}")
     if page_id:
-        _write(stdout, f"→ Re-indexing specific page ID: {page_id}")
+        _write(stdout, f"Re-indexing specific page ID: {page_id}")
     
     total_docs = 0
     total_pages = 0
@@ -538,7 +538,7 @@ def build_rag_index(
         _write(stdout, "ERROR: api_fields_extractor not available")
         return
     
-    _write(stdout, "→ Using api_fields_extractor")
+    _write(stdout, "Using api_fields_extractor")
     
     # Process each model
     _write(stdout, "")
@@ -553,17 +553,17 @@ def build_rag_index(
             if not page_id and prune_deleted:
                 deleted = store.delete_pages_not_in(live_ids, source=model_name)
                 if deleted:
-                    _write(stdout, f"  ✓ Pruned {deleted} stale document(s)")
+                    _write(stdout, f"  Pruned {deleted} stale document(s)")
             continue
         
         _write(stdout, f"\n[{model_idx}/{len(models)}] Processing {model_name}:")
-        _write(stdout, f"  → Found {count} live page(s)")
+        _write(stdout, f"  Found {count} live page(s)")
         
         # Check if model uses :* (all fields)
         field_names = None
         if model_name in models_with_all_fields:
             field_names = get_content_field_names(model)
-            _write(stdout, f"  → Extracting fields: {', '.join(field_names)}")
+            _write(stdout, f"  Extracting fields: {', '.join(field_names)}")
         
         # Extract documents from each page
         for page_idx, page in enumerate(pages, 1):
@@ -576,7 +576,7 @@ def build_rag_index(
                     last_published_at = page.last_published_at.isoformat()
                 
                 if not page_id and skip_if_indexed and store.page_is_current(page.id, last_published_at):
-                    _write(stdout, "    ↷ Skipping (already indexed and up-to-date)")
+                    _write(stdout, "    -> Skipping (already indexed and up-to-date)")
                     continue
                 
                 # Show which fields will be attempted for extraction
@@ -598,14 +598,14 @@ def build_rag_index(
                     fields_to_show = default_fields
                 
                 # Show what will be attempted
-                _write(stdout, f"      📋 Will try extracting: {', '.join(fields_to_show)} (from {extraction_source})")
+                _write(stdout, f"      Fields to extract: {', '.join(fields_to_show)} (from {extraction_source})")
                 
                 # Extract documents
-                _write(stdout, "      → Extracting content...")
+                _write(stdout, "      Extracting content...")
                 docs = page_to_documents_api_extractor(page, stdout=stdout)
                 
                 if not docs:
-                    _write(stdout, "      ⚠ No content extracted (all fields empty)")
+                    _write(stdout, "      WARNING: No content extracted (all fields empty)")
                     continue
                 
                 # Show what was actually indexed
@@ -616,10 +616,10 @@ def build_rag_index(
                 indexed_list = [f.strip() for f in extracted_fields.split(',')]
                 not_indexed = [f for f in fields_to_show if f not in indexed_list]
                 
-                _write(stdout, f"      ✅ Indexed fields: {extracted_fields}")
+                _write(stdout, f"      Indexed: {extracted_fields}")
                 if not_indexed:
-                    _write(stdout, f"      ⊘ Skipped: {', '.join(not_indexed)} (empty or missing)")
-                _write(stdout, f"      💾 Created {len(docs)} document(s)")
+                    _write(stdout, f"      Skipped: {', '.join(not_indexed)} (empty or missing)")
+                _write(stdout, f"      Created {len(docs)} document(s)")
                 
                 extractor_used = "api_fields_extractor"
                 
@@ -635,13 +635,13 @@ def build_rag_index(
                 # Save to vector store
                 store.delete_page(page.id)
                 store.upsert(docs)
-                _write(stdout, f"      💾 Indexed with {extractor_used}")
+                _write(stdout, f"      Saved to vector store")
 
                 total_docs += len(docs)
                 total_pages += 1
                 
             except Exception as e:
-                _write(stdout, f"      ✗ Error: {e}")
+                _write(stdout, f"      ERROR: {e}")
                 logger.exception(f"Error indexing page {page.id}")
                 if stdout:
                     import traceback
@@ -651,14 +651,14 @@ def build_rag_index(
         if not page_id and prune_deleted:
             deleted = store.delete_pages_not_in(live_ids, source=model_name)
             if deleted:
-                _write(stdout, f"  ✓ Pruned {deleted} stale document(s)")
+                _write(stdout, f"  Pruned {deleted} stale document(s)")
 
     # Step 3: Summary
     _write(stdout, "\n" + "="*80)
     _write(stdout, "STEP 3: Indexing Complete")
     _write(stdout, "="*80)
-    _write(stdout, f"✓ Processed {total_pages} page(s)")
-    _write(stdout, f"✓ Created {total_docs} document(s)")
-    _write(stdout, f"✓ Saved to {backend.upper()} collection: {collection}")
-    _write(stdout, f"✓ Storage location: {path}")
+    _write(stdout, f"Processed {total_pages} page(s)")
+    _write(stdout, f"Created {total_docs} document(s)")
+    _write(stdout, f"Saved to {backend.upper()} collection: {collection}")
+    _write(stdout, f"Storage location: {path}")
     _write(stdout, "="*80 + "\n")

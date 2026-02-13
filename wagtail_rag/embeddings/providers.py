@@ -18,6 +18,7 @@ PROVIDER_DEFAULTS: Dict[str, str] = {
     "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
     "hf": "sentence-transformers/all-MiniLM-L6-v2",
     "openai": "text-embedding-ada-002",
+    "ollama": "nomic-embed-text",
     "sentence_transformers": "sentence-transformers/all-MiniLM-L6-v2",
     "sentence-transformers": "sentence-transformers/all-MiniLM-L6-v2",  # Same as above (hyphen variant)
 }

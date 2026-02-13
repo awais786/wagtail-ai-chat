@@ -2,16 +2,19 @@
 Content Extraction and Indexing modules for Wagtail RAG.
 
 This package contains:
-- page_to_documents: Converts Wagtail pages to LangChain Document objects with chunking
+- api_fields_extractor: Advanced API fields-based content extractor
 - index_builder: Core indexing logic for building the RAG index
 """
 
-# Export document conversion (converts pages to LangChain documents)
-from .page_to_documents import (
-    wagtail_page_to_documents,
-    get_page_url,
-    extract_text_from_streamfield,
-)
+# Export primary extractor
+try:
+    from .api_fields_extractor import (
+        page_to_documents_api_extractor,
+        WagtailAPIExtractor,
+    )
+except ImportError:
+    page_to_documents_api_extractor = None
+    WagtailAPIExtractor = None
 
 # Export index building function
 from .index_builder import build_rag_index
@@ -20,10 +23,9 @@ from .index_builder import build_rag_index
 from .index_builder import get_page_models, get_live_pages, ChromaStore
 
 __all__ = [
-    # Document conversion
-    'wagtail_page_to_documents',
-    'get_page_url',
-    'extract_text_from_streamfield',
+    # Primary extractor
+    'page_to_documents_api_extractor',
+    'WagtailAPIExtractor',
     # Index building
     'build_rag_index',
     # Index builder components

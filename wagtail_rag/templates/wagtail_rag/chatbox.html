@@ -5,6 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RAG Chatbox</title>
     <style>
+        /* Themeable CSS Variables - Override these in your site's CSS */
+        :root {
+            --chatbox-primary: #667eea;
+            --chatbox-primary-dark: #5568d3;
+            --chatbox-secondary: #764ba2;
+            --chatbox-bg: white;
+            --chatbox-body-bg: #f5f5f5;
+            --chatbox-border: #e9ecef;
+            --chatbox-text: #212529;
+            --chatbox-text-muted: #6c757d;
+            --chatbox-user-bg: #667eea;
+            --chatbox-user-text: white;
+            --chatbox-bot-bg: #f1f3f5;
+            --chatbox-bot-text: #212529;
+            --chatbox-error-bg: #fee;
+            --chatbox-error-text: #c33;
+            --chatbox-error-border: #fcc;
+            --chatbox-link: #667eea;
+            --chatbox-disabled: #ccc;
+            --chatbox-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            --chatbox-border-radius: 12px;
+            --chatbox-border-radius-lg: 18px;
+            --chatbox-border-radius-pill: 24px;
+            --chatbox-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,17 +38,17 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
+            font-family: var(--chatbox-font-family);
+            background: var(--chatbox-body-bg);
             padding: 20px;
         }
 
         .chatbox-container {
             max-width: 600px;
             margin: 0 auto;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background: var(--chatbox-bg);
+            border-radius: var(--chatbox-border-radius);
+            box-shadow: var(--chatbox-shadow);
             overflow: hidden;
             display: flex;
             flex-direction: column;
@@ -30,8 +56,8 @@
         }
 
         .chatbox-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: linear-gradient(135deg, var(--chatbox-primary) 0%, var(--chatbox-secondary) 100%);
+            color: var(--chatbox-user-text);
             padding: 20px;
             text-align: center;
         }
@@ -46,7 +72,7 @@
             flex: 1;
             overflow-y: auto;
             padding: 20px;
-            background: white;
+            background: var(--chatbox-bg);
         }
 
         .message {
@@ -71,36 +97,36 @@
             display: inline-block;
             max-width: 80%;
             padding: 12px 16px;
-            border-radius: 18px;
+            border-radius: var(--chatbox-border-radius-lg);
             word-wrap: break-word;
         }
 
         .message.user .message-content {
-            background: #667eea;
-            color: white;
+            background: var(--chatbox-user-bg);
+            color: var(--chatbox-user-text);
             border-bottom-right-radius: 4px;
         }
 
         .message.bot .message-content {
-            background: #f1f3f5;
-            color: #212529;
+            background: var(--chatbox-bot-bg);
+            color: var(--chatbox-bot-text);
             border-bottom-left-radius: 4px;
         }
 
         .message.bot .message-content.error {
-            background: #fee;
-            color: #c33;
-            border: 1px solid #fcc;
+            background: var(--chatbox-error-bg);
+            color: var(--chatbox-error-text);
+            border: 1px solid var(--chatbox-error-border);
         }
 
         .sources {
             margin-top: 8px;
             font-size: 12px;
-            color: #6c757d;
+            color: var(--chatbox-text-muted);
         }
 
         .sources a {
-            color: #667eea;
+            color: var(--chatbox-link);
             text-decoration: none;
         }
 
@@ -111,8 +137,8 @@
 
         .chatbox-input-container {
             padding: 16px;
-            background: white;
-            border-top: 1px solid #e9ecef;
+            background: var(--chatbox-bg);
+            border-top: 1px solid var(--chatbox-border);
         }
 
         .input-wrapper {
@@ -123,35 +149,37 @@
         .chatbox-input {
             flex: 1;
             padding: 12px 16px;
-            border: 2px solid #e9ecef;
-            border-radius: 24px;
+            border: 2px solid var(--chatbox-border);
+            border-radius: var(--chatbox-border-radius-pill);
             font-size: 14px;
             outline: none;
             transition: border-color 0.3s;
+            font-family: var(--chatbox-font-family);
         }
 
         .chatbox-input:focus {
-            border-color: #667eea;
+            border-color: var(--chatbox-primary);
         }
 
         .send-button {
             padding: 12px 24px;
-            background: #667eea;
-            color: white;
+            background: var(--chatbox-primary);
+            color: var(--chatbox-user-text);
             border: none;
-            border-radius: 24px;
+            border-radius: var(--chatbox-border-radius-pill);
             cursor: pointer;
             font-size: 14px;
             font-weight: 500;
             transition: background 0.3s;
+            font-family: var(--chatbox-font-family);
         }
 
         .send-button:hover:not(:disabled) {
-            background: #5568d3;
+            background: var(--chatbox-primary-dark);
         }
 
         .send-button:disabled {
-            background: #ccc;
+            background: var(--chatbox-disabled);
             cursor: not-allowed;
         }
 
@@ -160,7 +188,7 @@
             width: 16px;
             height: 16px;
             border: 2px solid #f3f3f3;
-            border-top: 2px solid #667eea;
+            border-top: 2px solid var(--chatbox-primary);
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -172,7 +200,7 @@
 
         .empty-state {
             text-align: center;
-            color: #6c757d;
+            color: var(--chatbox-text-muted);
             padding: 40px 20px;
         }
 

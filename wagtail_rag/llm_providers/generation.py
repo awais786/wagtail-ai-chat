@@ -90,17 +90,24 @@ class LLMGenerator:
         return getattr(
             settings,
             "WAGTAIL_RAG_PROMPT_TEMPLATE",
-            """You are a helpful assistant. Use ONLY the following context to answer the question.
-If the context does not mention some detail, simply do not talk about that detail.
-Do not say things like "the context does not contain" or explain what is missing.
+            """You are a knowledgeable assistant helping users find information from a Wagtail CMS website. Your goal is to provide accurate, helpful answers based strictly on the provided context.
 
-Context:
+**Instructions:**
+1. Answer ONLY using information explicitly stated in the context below
+2. If the context contains the answer, provide a clear, well-structured response
+3. Cite the source page when providing information (e.g., "According to [Page Title]...")
+4. If the context does NOT contain enough information to answer the question, respond with: "I don't have enough information in the available content to answer that question."
+5. Be concise but complete - prioritize clarity over brevity
+6. If the question has multiple parts, address each part separately
+7. Do not make assumptions or add information not present in the context
+
+**Context:**
 {context}
 
-Question:
+**Question:**
 {question}
 
-Answer:""",
+**Answer:**""",
         )
 
     def _get_system_prompt(self) -> str:
@@ -108,9 +115,7 @@ Answer:""",
         return getattr(
             settings,
             "WAGTAIL_RAG_SYSTEM_PROMPT",
-            """You are a helpful assistant. Use ONLY the following context to answer the question.
-If the context does not mention some detail, simply do not talk about that detail.
-Do not say things like "the context does not contain" or explain what is missing.""",
+            """You are a knowledgeable assistant for a Wagtail CMS website. Answer questions using ONLY the provided context. Always cite sources when available. If you cannot answer based on the context, clearly state "I don't have enough information to answer that question." Be accurate, concise, and helpful.""",
         )
 
     def _create_qa_chain(self) -> Optional[Any]:
@@ -201,13 +206,21 @@ Do not say things like "the context does not contain" or explain what is missing
             chain_type_kwargs={"prompt": prompt},
         )
 
+    def _get_context_from_docs(self, docs: List[Any]) -> str:
+        """Build context string from docs, optionally truncated by WAGTAIL_RAG_MAX_CONTEXT_CHARS."""
+        context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
+        max_context_chars = int(getattr(settings, "WAGTAIL_RAG_MAX_CONTEXT_CHARS", 0))
+        if max_context_chars and len(context) > max_context_chars:
+            context = context[: max_context_chars - 3] + "..."
+        return context
+
     def _format_simple_prompt(
         self,
         question: str,
         docs: List[Any],
     ) -> str:
         """Format a plain-text prompt using retrieved documents (fallback path)."""
-        context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
+        context = self._get_context_from_docs(docs)
         return self.prompt_template_str.format(
             context=context,
             question=question,
@@ -311,9 +324,9 @@ Do not say things like "the context does not contain" or explain what is missing
         This is used as a fallback when no QA chain is available.
         Handles both chat models (ChatOllama, ChatOpenAI, etc.) and regular LLMs.
         """
-        context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
+        context = self._get_context_from_docs(docs)
         input_text = f"Context:\n{context}\n\nQuestion:\n{question}"
-        prompt_text = self._format_simple_prompt(question, docs)
+        prompt_text = self.prompt_template_str.format(context=context, question=question)
         
         # Detect if this is a chat model (expects messages, not plain strings)
         is_chat_model = self._is_chat_model()
