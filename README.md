@@ -139,7 +139,7 @@ WAGTAIL_RAG_MODEL_NAME = "mistral"
 
 # Embedding configuration
 WAGTAIL_RAG_EMBEDDING_PROVIDER = "openai"
-WAGTAIL_RAG_EMBEDDING_MODEL = "text-embedding-ada-002"
+WAGTAIL_RAG_EMBEDDING_MODEL = "text-embedding-3-small"
 
 # LLM configuration
 WAGTAIL_RAG_LLM_PROVIDER = "openai"
@@ -207,6 +207,18 @@ WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION = True
 
 # Enable/disable hybrid search (default: True)
 WAGTAIL_RAG_USE_HYBRID_SEARCH = True
+
+# Optional provider-specific model settings (recommended for multi-provider setups)
+# These take precedence over WAGTAIL_RAG_MODEL_NAME / WAGTAIL_RAG_EMBEDDING_MODEL
+WAGTAIL_RAG_OPENAI_MODEL_NAME = "gpt-4"
+WAGTAIL_RAG_ANTHROPIC_MODEL_NAME = "claude-3-sonnet-20240229"
+WAGTAIL_RAG_OLLAMA_MODEL_NAME = "mistral"
+WAGTAIL_RAG_HUGGINGFACE_MODEL_NAME = "google/flan-t5-base"
+
+WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+WAGTAIL_RAG_OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
+WAGTAIL_RAG_HUGGINGFACE_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
 ```
 
 ### API and Security
@@ -257,54 +269,7 @@ WAGTAIL_RAG_CHUNK_OVERLAP = 200  # Overlap between chunks
 WAGTAIL_RAG_SKIP_IF_INDEXED = True
 # Remove stale documents for pages that have been deleted (default: True)
 WAGTAIL_RAG_PRUNE_DELETED = True
-# Use new extractor by default (SmartWagtailExtractor: adaptive chunking for any page)
-# Default True. Set False to use the original chunked extractor (page_to_documents) only.
-WAGTAIL_RAG_USE_NEW_EXTRACTOR = True
-# New extractor: chunk only when content exceeds this many characters (default 2000)
-WAGTAIL_RAG_NEW_EXTRACTOR_SIZE_THRESHOLD = 2000
-# New extractor: chunk large pages by section (title, intro, body, metadata) when True
-WAGTAIL_RAG_NEW_EXTRACTOR_CHUNK_BY_SECTION = True
 ```
-
-### Advanced Extractor Configuration (Optional)
-
-The new extractor (`SmartWagtailExtractor`) is **fully generic** and works with **any Wagtail site** without model-specific assumptions. It automatically detects field types and extracts content accordingly.
-
-**Default behavior works for most sites.** These settings are only needed for customization:
-
-```python
-# Maximum items to extract from ManyToMany fields (default: 10)
-WAGTAIL_RAG_MAX_METADATA_ITEMS = 10
-
-# Maximum length for text fields in metadata before truncation (default: 500)
-WAGTAIL_RAG_MAX_TEXT_FIELD_LENGTH = 500
-
-# Custom field name patterns for introduction/description fields
-# (default: ["introduction", "intro", "description", "summary", "excerpt", "lead", "standfirst"])
-WAGTAIL_RAG_INTRO_PATTERNS = ["introduction", "intro", "description", "excerpt"]
-
-# Custom field name patterns for main body/content fields
-# (default: ["body", "content", "main_content", "text", "streamfield", "page_body"])
-WAGTAIL_RAG_BODY_PATTERNS = ["body", "content", "main_content"]
-
-# Additional system fields to skip during extraction (optional)
-# Wagtail system fields are already skipped by default
-WAGTAIL_RAG_SKIP_FIELDS = {"custom_internal_field", "temp_data"}
-```
-
-**How the extractor works generically:**
-
-1. **Field Discovery**: Automatically finds intro, body, and metadata fields by field type and naming patterns
-2. **StreamFields**: Extracts ALL StreamFields (including non-body ones like `backstory` on RecipePage)
-3. **RichText**: Extracts plain text from RichTextField objects
-4. **Relationships**: Includes ForeignKey and ManyToMany field values
-5. **Narrative Structure**: Creates natural-language documents for better LLM understanding
-6. **No Model Assumptions**: Works with BlogPage, ProductPage, LocationPage, or any custom model
-
-**Example**: For a custom `EventPage` with fields `event_date`, `venue`, and `program` (StreamField), the extractor will automatically:
-- Extract `event_date` and `venue` as metadata
-- Extract `program` StreamField as body content
-- Create a document like: "Summer Festival. The event date is 2024-07-15. The venue is Central Park. [program content]"
 
 ### Custom Prompt Templates (Optional)
 
@@ -374,22 +339,6 @@ Model selection is controlled by Django settings (`WAGTAIL_RAG_MODELS` and `WAGT
 python manage.py build_rag_index --reset-only
 python manage.py build_rag_index
 ```
-
-### Comparing extractors (new vs chunked)
-
-To compare the new extractor (SmartWagtailExtractor, default) with the original chunked extractor on a single page:
-
-```bash
-python manage.py compare_extractors --page-id 123
-```
-
-Optional: write full comparison to JSON for diffing:
-
-```bash
-python manage.py compare_extractors --page-id 123 --output /tmp/compare.json
-```
-
-The new extractor is used by default. Set `WAGTAIL_RAG_USE_NEW_EXTRACTOR = False` in settings to use only the chunked extractor.
 
 ### Interactive Chat from Command Line
 
@@ -537,7 +486,7 @@ curl -X POST http://localhost:8000/api/rag/chat/ \
 
 1. **Indexing**: When you run `python manage.py build_rag_index`:
    - The command delegates to the shared index builder (`wagtail_rag.content_extraction.index_builder.build_rag_index`).
-   - The builder discovers Wagtail Page models from settings (`WAGTAIL_RAG_MODELS` or all page types), gets live pages, and for each page tries the **new extractor** (SmartWagtailExtractor) first by default. It converts pages to LangChain Document objects with adaptive chunking (small pages → one doc, large pages → chunked by section). If the new extractor returns nothing, it falls back to the **chunked extractor** (`wagtail_page_to_documents`: title, intro, chunked body with title context).
+   - The builder discovers Wagtail Page models from settings (`WAGTAIL_RAG_MODELS` or all page types), gets live pages, and extracts content using `api_fields_extractor` (api_fields first, then configured default fields, then auto-discovery fallback).
    - Each document gets metadata (page_id, page_type, slug, url, section, chunk_index, doc_id, etc.); the builder adds model-level metadata (source, model, app) and upserts chunks into the vector store (FAISS or ChromaDB) with deterministic IDs. Old chunks for a page are removed before re-indexing so updates stay consistent.
 
 2. **Querying**: The chatbot:
@@ -577,6 +526,10 @@ This error occurs when you specify a model name that doesn't match the provider 
 ```python
 WAGTAIL_RAG_LLM_PROVIDER = 'openai'
 WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
+
+# Better: use provider-specific model settings to avoid cross-provider mismatch
+WAGTAIL_RAG_OPENAI_MODEL_NAME = 'gpt-4'
+WAGTAIL_RAG_OLLAMA_MODEL_NAME = 'mistral'
 ```
 
 ### "No pages found to index"

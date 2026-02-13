@@ -128,7 +128,7 @@ class EmbeddingSearcher:
         for doc in docs:
             meta = getattr(doc, "metadata", {}) or {}
             url = meta.get("url", "")
-            doc_id = meta.get("id")
+            doc_id = meta.get("page_id") or meta.get("id")
             if url:
                 seen_urls.add(url)
             if doc_id:
@@ -185,6 +185,7 @@ class EmbeddingSearcher:
                         metadata={
                             "title": getattr(page, "title", ""),
                             "url": page_url,
+                            "page_id": getattr(page, "id", None),
                             "id": getattr(page, "id", None),
                             "model": page.__class__.__name__,
                             "from_wagtail_search": True,
@@ -418,7 +419,7 @@ class EmbeddingSearcher:
         for doc, score in raw_results:
             meta = getattr(doc, "metadata", {}) or {}
             url = meta.get("url") or ""
-            doc_id = meta.get("id")
+            doc_id = meta.get("page_id") or meta.get("id")
             key = (url, doc_id)
             if key not in best_by_key or score < best_by_key[key][1]:
                 best_by_key[key] = (doc, score)

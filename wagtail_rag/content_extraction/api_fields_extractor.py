@@ -4,7 +4,7 @@ Simple extractor using Wagtail's API serialization.
 Uses Wagtail's built-in methods to extract content, avoiding manual field type handling.
 """
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from django.conf import settings
 from django.utils.html import strip_tags
@@ -26,6 +26,17 @@ DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_CHUNK_OVERLAP = 200
 DEFAULT_SIZE_THRESHOLD = 2000
 MIN_FIELD_LENGTH = 10
+DEFAULT_FIELDS = ['introduction', 'body', 'content', 'backstory']
+SYSTEM_FIELDS = {
+    'id', 'path', 'depth', 'title', 'slug', 'draft_title',
+    'content_type', 'live', 'has_unpublished_changes', 'owner',
+    'locked', 'locked_at', 'locked_by', 'latest_revision',
+    'latest_revision_created_at', 'live_revision', 'first_published_at',
+    'last_published_at', 'go_live_at', 'expire_at', 'expired',
+    'search_description', 'seo_title', 'show_in_menus', 'url_path',
+    'translation_key', 'locale', 'alias_of',
+}
+CORE_SKIP_FIELDS = {'id', 'path', 'depth', 'title', 'slug'}
 
 
 class WagtailAPIExtractor:
@@ -71,17 +82,6 @@ class WagtailAPIExtractor:
         from wagtail.fields import StreamField, RichTextField
         from django.db.models import TextField, ForeignKey, ManyToManyField
         
-        # System fields to skip
-        SYSTEM_FIELDS = {
-            'id', 'path', 'depth', 'title', 'slug', 'draft_title',
-            'content_type', 'live', 'has_unpublished_changes', 'owner',
-            'locked', 'locked_at', 'locked_by', 'latest_revision',
-            'latest_revision_created_at', 'live_revision', 'first_published_at',
-            'last_published_at', 'go_live_at', 'expire_at', 'expired',
-            'search_description', 'seo_title', 'show_in_menus', 'url_path',
-            'translation_key', 'locale', 'alias_of',
-        }
-        
         available_fields = []
         
         try:
@@ -121,7 +121,7 @@ class WagtailAPIExtractor:
                 field_name = field.name
                 
                 # Skip system fields
-                if field_name.startswith('_') or field_name in ['id', 'path', 'depth', 'title', 'slug']:
+                if field_name.startswith('_') or field_name in CORE_SKIP_FIELDS:
                     continue
                 
                 # Skip relationship fields
@@ -138,6 +138,52 @@ class WagtailAPIExtractor:
             logger.debug(f"Error discovering fields for {page.__class__.__name__}: {e}")
         
         return content_fields
+
+    @staticmethod
+    def _resolve_candidate_fields(page) -> Tuple[List[str], str]:
+        """
+        Determine candidate fields in priority order:
+        1) model api_fields
+        2) configured defaults
+        3) auto-discovered content fields (if defaults missing on model)
+        """
+        api_fields: List[str] = []
+        field_source = None
+
+        if hasattr(page, 'api_fields'):
+            api_fields = [f.name for f in page.api_fields if hasattr(f, 'name')]
+            if api_fields:
+                field_source = f"model api_fields: {', '.join(api_fields)}"
+                logger.debug(f"Using api_fields from {page.__class__.__name__}: {', '.join(api_fields)}")
+
+        if not api_fields:
+            api_fields = getattr(settings, 'WAGTAIL_RAG_DEFAULT_FIELDS', DEFAULT_FIELDS)
+            field_source = "default fields"
+            logger.debug(f"No api_fields, trying default fields: {', '.join(api_fields)}")
+
+        if not any(hasattr(page, field) for field in api_fields):
+            logger.debug(f"No standard fields found on {page.__class__.__name__}, auto-discovering...")
+            discovered_fields = WagtailAPIExtractor._discover_content_fields(page)
+            if discovered_fields:
+                api_fields = discovered_fields
+                field_source = f"auto-discovered: {', '.join(discovered_fields)}"
+                logger.debug(f"Discovered fields: {', '.join(discovered_fields)}")
+
+        return api_fields, field_source or "unknown"
+
+    @staticmethod
+    def _build_metadata(page) -> Dict[str, str]:
+        """Build common metadata shared by full and chunked documents."""
+        metadata = {
+            "page_id": page.id,
+            "page_type": page.__class__.__name__,
+            "title": str(page.title),
+            "slug": getattr(page, 'slug', ''),
+            "url": WagtailAPIExtractor._get_page_url(page),
+        }
+        if getattr(page, "last_published_at", None):
+            metadata["last_published_at"] = page.last_published_at.isoformat()
+        return metadata
     
     @staticmethod
     def _clean_text(text) -> str:
@@ -267,45 +313,10 @@ class WagtailAPIExtractor:
         if available_fields:
             logger.info(f"Available content fields on {page.__class__.__name__}: {', '.join(available_fields)}")
         
-        # Step 1: Try to get API fields defined on the page
-        api_fields = []
-        field_source = None
-        
-        if hasattr(page, 'api_fields'):
-            api_fields = [f.name for f in page.api_fields if hasattr(f, 'name')]
-            if api_fields:
-                field_source = f"model api_fields: {', '.join(api_fields)}"
-                logger.debug(f"Using api_fields from {page.__class__.__name__}: {', '.join(api_fields)}")
-        
-        # Step 2: Fallback to configured default fields
-        if not api_fields:
-            api_fields = getattr(
-                settings, 
-                'WAGTAIL_RAG_DEFAULT_FIELDS', 
-                ['introduction', 'body', 'content', 'backstory']
-            )
-            field_source = f"default fields"
-            logger.debug(f"No api_fields, trying default fields: {', '.join(api_fields)}")
-        
-        # Step 3: Last resort - auto-discover content fields
-        if not any(hasattr(page, field) for field in api_fields):
-            logger.debug(f"No standard fields found on {page.__class__.__name__}, auto-discovering...")
-            discovered_fields = self._discover_content_fields(page)
-            if discovered_fields:
-                api_fields = discovered_fields
-                field_source = f"auto-discovered: {', '.join(discovered_fields)}"
-                logger.debug(f"Discovered fields: {', '.join(discovered_fields)}")
+        api_fields, field_source = self._resolve_candidate_fields(page)
 
         # Base metadata
-        metadata = {
-            "page_id": page.id,
-            "page_type": page.__class__.__name__,
-            "title": str(page.title),
-            "slug": getattr(page, 'slug', ''),
-            "url": self._get_page_url(page),
-        }
-        if getattr(page, "last_published_at", None):
-            metadata["last_published_at"] = page.last_published_at.isoformat()
+        metadata = self._build_metadata(page)
         
         # Extract all fields
         sections = {}

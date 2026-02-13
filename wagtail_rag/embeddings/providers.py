@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 PROVIDER_DEFAULTS: Dict[str, str] = {
     "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
     "hf": "sentence-transformers/all-MiniLM-L6-v2",
-    "openai": "text-embedding-ada-002",
+    "openai": "text-embedding-3-small",
     "ollama": "nomic-embed-text",
     "sentence_transformers": "sentence-transformers/all-MiniLM-L6-v2",
     "sentence-transformers": "sentence-transformers/all-MiniLM-L6-v2",  # Same as above (hyphen variant)
@@ -151,13 +151,58 @@ class EmbeddingProviderFactory:
     def __init__(self, django_settings=None):
         self.settings = django_settings or settings
 
+    def _is_model_compatible(self, provider: str, model_name: str) -> bool:
+        """Best-effort compatibility check to avoid obvious provider/model mismatches."""
+        if not model_name:
+            return False
+        provider = provider.lower()
+        hf_aliases = {"huggingface", "hf", "sentence-transformers", "sentence_transformers"}
+
+        if provider == "openai":
+            return model_name.startswith("text-embedding-")
+        if provider in hf_aliases:
+            # HF models are usually repo-style names like org/model.
+            return "/" in model_name and not model_name.startswith("text-embedding-")
+        if provider == "ollama":
+            # Ollama model names are typically short local tags, not HF repo paths or OpenAI names.
+            return ("/" not in model_name) and (not model_name.startswith("text-embedding-"))
+        return True
+
+    def _resolve_setting_model_name(self, provider: str) -> Optional[str]:
+        """
+        Resolve model name from provider-specific setting first, then global setting.
+        """
+        provider_setting_key_map = {
+            "openai": "WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL",
+            "ollama": "WAGTAIL_RAG_OLLAMA_EMBEDDING_MODEL",
+            "huggingface": "WAGTAIL_RAG_HUGGINGFACE_EMBEDDING_MODEL",
+            "hf": "WAGTAIL_RAG_HUGGINGFACE_EMBEDDING_MODEL",
+            "sentence-transformers": "WAGTAIL_RAG_HUGGINGFACE_EMBEDDING_MODEL",
+            "sentence_transformers": "WAGTAIL_RAG_HUGGINGFACE_EMBEDDING_MODEL",
+        }
+        provider_setting_key = provider_setting_key_map.get(provider)
+        if provider_setting_key:
+            provider_model = getattr(self.settings, provider_setting_key, None)
+            if provider_model:
+                return provider_model
+        return getattr(self.settings, "WAGTAIL_RAG_EMBEDDING_MODEL", None)
+
     def _resolve_model_name(self, provider: str, model_name: Optional[str]) -> str:
         """Resolve model name from explicit value, settings, or provider defaults."""
         if model_name:
             return model_name
-        settings_model = getattr(self.settings, "WAGTAIL_RAG_EMBEDDING_MODEL", None)
+
+        settings_model = self._resolve_setting_model_name(provider)
         if settings_model:
-            return settings_model
+            if not self._is_model_compatible(provider, settings_model):
+                logger.warning(
+                    "Ignoring incompatible embedding model '%s' for provider '%s'; falling back to provider default.",
+                    settings_model,
+                    provider,
+                )
+            else:
+                return settings_model
+
         default = PROVIDER_DEFAULTS.get(provider)
         if not default:
             raise ValueError(f"model_name must be specified for embedding provider '{provider}'")

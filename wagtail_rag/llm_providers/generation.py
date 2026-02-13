@@ -42,6 +42,13 @@ except Exception:
     HUMAN_MESSAGE_AVAILABLE = False
 
 try:
+    from langchain_core.language_models.chat_models import BaseChatModel
+    BASE_CHAT_MODEL_AVAILABLE = True
+except Exception:
+    BaseChatModel = None
+    BASE_CHAT_MODEL_AVAILABLE = False
+
+try:
     # Legacy LangChain interfaces
     from langchain.prompts import PromptTemplate
     from langchain.chains import RetrievalQA
@@ -123,6 +130,7 @@ class LLMGenerator:
 
         Returns the constructed chain or None if no retriever or supported chain is available.
         """
+        breakpoint()
         if not self.retriever:
             return None
 
@@ -211,6 +219,8 @@ class LLMGenerator:
         context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
         max_context_chars = int(getattr(settings, "WAGTAIL_RAG_MAX_CONTEXT_CHARS", 0))
         if max_context_chars and len(context) > max_context_chars:
+            if max_context_chars <= 3:
+                return context[:max_context_chars]
             context = context[: max_context_chars - 3] + "..."
         return context
 
@@ -227,6 +237,8 @@ class LLMGenerator:
         )
 
     def _is_chat_model(self) -> bool:
+        if BASE_CHAT_MODEL_AVAILABLE and BaseChatModel and isinstance(self.llm, BaseChatModel):
+            return True
         return (
             hasattr(self.llm, '__class__') and 'Chat' in self.llm.__class__.__name__
         ) or (
@@ -267,6 +279,7 @@ class LLMGenerator:
     def _invoke_chat_model(self, prompt_text: str) -> str:
         """Invoke a chat model (ChatOllama, ChatOpenAI, etc.) with messages."""
         # Try with HumanMessage wrapper first
+        breakpoint()
         if HUMAN_MESSAGE_AVAILABLE and HumanMessage:
             try:
                 message = HumanMessage(content=prompt_text)

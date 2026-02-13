@@ -141,37 +141,68 @@ class HuggingFaceProvider(BaseLLMProvider):
         If endpoint_url is provided, model_name can be None.
         Task can be overridden via kwargs (default: "text-generation").
         """
-        # Prefer local transformers pipeline if available, otherwise use hosted endpoint
+        endpoint_url = kwargs.get("endpoint_url") or getattr(self.settings, "HUGGINGFACE_ENDPOINT_URL", None)
+        api_key = kwargs.get("api_key") or getattr(self.settings, "HUGGINGFACE_API_KEY", None)
+
+        # If endpoint is explicitly provided, use hosted mode directly.
+        if endpoint_url:
+            try:
+                from langchain_community.llms import HuggingFaceEndpoint  # type: ignore
+            except Exception as e:
+                raise ImportError(
+                    "HuggingFace endpoint mode not available. Install: pip install langchain-community"
+                ) from e
+            endpoint_kwargs = dict(kwargs)
+            endpoint_kwargs.pop("endpoint_url", None)
+            endpoint_kwargs.pop("api_key", None)
+            return HuggingFaceEndpoint(
+                endpoint_url=endpoint_url,
+                huggingfacehub_api_token=api_key,
+                **endpoint_kwargs,
+            )
+
+        # Prefer local transformers pipeline.
         try:
             from langchain_huggingface import HuggingFacePipeline  # type: ignore
             from transformers import pipeline  # type: ignore
-
-            # Allow task override via kwargs (default: "text-generation")
-            task = kwargs.pop("task", "text-generation")
-            model_id = kwargs.pop("model_id", model_name)
-            
-            if not model_id:
-                raise ValueError("model_name or model_id is required for HuggingFace pipeline")
-            
-            # Filter out endpoint_url and other non-pipeline kwargs
-            pipeline_kwargs = {k: v for k, v in kwargs.items() if k not in ("endpoint_url", "api_key")}
-            pipe = pipeline(task, model=model_id, **pipeline_kwargs)
-            return HuggingFacePipeline(pipeline=pipe)
         except Exception:
+            # Local pipeline dependencies unavailable; fallback to hosted endpoint path.
             try:
                 from langchain_community.llms import HuggingFaceEndpoint  # type: ignore
-                endpoint_url = kwargs.pop("endpoint_url", None) or getattr(self.settings, "HUGGINGFACE_ENDPOINT_URL", None)
-                api_key = kwargs.pop("api_key", None) or getattr(self.settings, "HUGGINGFACE_API_KEY", None)
-
-                # If endpoint_url not provided, construct from model_name
-                if not endpoint_url:
-                    if not model_name:
-                        raise ValueError("Either endpoint_url or model_name must be provided for HuggingFace endpoint")
-                    endpoint_url = f"https://api-inference.huggingface.co/models/{model_name}"
-
-                return HuggingFaceEndpoint(endpoint_url=endpoint_url, huggingfacehub_api_token=api_key, **kwargs)
             except Exception as e:
-                raise ImportError("HuggingFace provider not available. Install: pip install langchain-huggingface transformers") from e
+                raise ImportError(
+                    "HuggingFace provider not available. Install: pip install langchain-huggingface transformers"
+                ) from e
+
+            model_for_endpoint = kwargs.get("model_id", model_name)
+            if not model_for_endpoint:
+                raise ValueError("Either endpoint_url or model_name must be provided for HuggingFace endpoint")
+            endpoint_url = f"https://api-inference.huggingface.co/models/{model_for_endpoint}"
+            endpoint_kwargs = dict(kwargs)
+            endpoint_kwargs.pop("model_id", None)
+            endpoint_kwargs.pop("task", None)
+            endpoint_kwargs.pop("endpoint_url", None)
+            endpoint_kwargs.pop("api_key", None)
+            return HuggingFaceEndpoint(
+                endpoint_url=endpoint_url,
+                huggingfacehub_api_token=api_key,
+                **endpoint_kwargs,
+            )
+
+        # Dependencies are present; pipeline creation failures should be surfaced, not masked.
+        task = kwargs.pop("task", "text-generation")
+        model_id = kwargs.pop("model_id", model_name)
+        if not model_id:
+            raise ValueError("model_name or model_id is required for HuggingFace pipeline")
+        pipeline_kwargs = {k: v for k, v in kwargs.items() if k not in ("endpoint_url", "api_key")}
+        try:
+            pipe = pipeline(task, model=model_id, **pipeline_kwargs)
+            return HuggingFacePipeline(pipeline=pipe)
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to initialize local HuggingFace pipeline. "
+                "Provide endpoint_url to use hosted inference, or fix local transformers setup."
+            ) from e
 
 
 # --- Factory using provider classes -----------------------------------
@@ -193,13 +224,51 @@ class LLMProviderFactory:
     def __init__(self, django_settings=None):
         self.settings = django_settings or settings
 
+    def _is_model_compatible(self, provider: str, model_name: str) -> bool:
+        """Best-effort guard against obvious provider/model mismatches."""
+        if not model_name:
+            return False
+        provider = provider.lower()
+        lower = model_name.lower()
+        if provider == "openai":
+            return not lower.startswith("claude")
+        if provider in {"anthropic", "claude"}:
+            return lower.startswith("claude")
+        if provider == "ollama":
+            return not (lower.startswith("gpt-") or lower.startswith("claude"))
+        return True
+
+    def _resolve_setting_model_name(self, provider: str) -> Optional[str]:
+        """Resolve provider-specific model setting first, then global setting."""
+        provider_setting_key_map = {
+            "openai": "WAGTAIL_RAG_OPENAI_MODEL_NAME",
+            "anthropic": "WAGTAIL_RAG_ANTHROPIC_MODEL_NAME",
+            "claude": "WAGTAIL_RAG_ANTHROPIC_MODEL_NAME",
+            "ollama": "WAGTAIL_RAG_OLLAMA_MODEL_NAME",
+            "huggingface": "WAGTAIL_RAG_HUGGINGFACE_MODEL_NAME",
+            "hf": "WAGTAIL_RAG_HUGGINGFACE_MODEL_NAME",
+        }
+        provider_key = provider_setting_key_map.get(provider)
+        if provider_key:
+            provider_value = getattr(self.settings, provider_key, None)
+            if provider_value:
+                return provider_value
+        return getattr(self.settings, "WAGTAIL_RAG_MODEL_NAME", None)
+
     def _resolve_model_name(self, provider: str, model_name: Optional[str]) -> Optional[str]:
         """Resolve model name from explicit value, settings, or provider defaults."""
         if model_name:
             return model_name
-        settings_model = getattr(self.settings, "WAGTAIL_RAG_MODEL_NAME", None)
+
+        settings_model = self._resolve_setting_model_name(provider)
         if settings_model:
-            return settings_model
+            if self._is_model_compatible(provider, settings_model):
+                return settings_model
+            logger.warning(
+                "Ignoring incompatible model '%s' for provider '%s'; falling back to provider default.",
+                settings_model,
+                provider,
+            )
         return PROVIDER_DEFAULTS.get(provider)
 
     @classmethod

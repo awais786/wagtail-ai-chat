@@ -4,11 +4,15 @@ Django management command for interactive RAG chatbot testing from command line.
 import json
 import traceback
 import uuid
+from typing import Any, Dict, Optional
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from wagtail_rag.rag_chatbot import get_chatbot
+
+EXIT_COMMANDS = {"exit", "quit"}
+SOURCES_USAGE = "Usage: sources on|off\n"
 
 
 class Command(BaseCommand):
@@ -49,20 +53,13 @@ class Command(BaseCommand):
         self._display_config(options)
 
         # Parse metadata filter if provided
-        metadata_filter = None
-        if options['filter']:
-            try:
-                metadata_filter = json.loads(options['filter'])
-            except json.JSONDecodeError as e:
-                self.stdout.write(self.style.ERROR(f'Invalid JSON filter: {e}'))
-                return
-            if not isinstance(metadata_filter, dict):
-                self.stdout.write(self.style.ERROR('Invalid filter: expected a JSON object (e.g. {"model": "BlogPage"})'))
-                return
+        metadata_filter = self._parse_filter(options.get("filter"))
+        if options.get("filter") and metadata_filter is None:
+            return
 
         # Initialize chatbot (uses Django settings)
         try:
-            chatbot_kwargs = {}
+            chatbot_kwargs: Dict[str, Any] = {}
             if metadata_filter:
                 chatbot_kwargs['metadata_filter'] = metadata_filter
 
@@ -89,6 +86,21 @@ class Command(BaseCommand):
             options['no_history'],
             options['no_sources']
         )
+
+    def _parse_filter(self, filter_value: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Parse --filter JSON value and validate expected shape."""
+        if not filter_value:
+            return None
+        try:
+            parsed = json.loads(filter_value)
+        except json.JSONDecodeError as e:
+            self.stdout.write(self.style.ERROR(f'Invalid JSON filter: {e}'))
+            return None
+
+        if not isinstance(parsed, dict):
+            self.stdout.write(self.style.ERROR('Invalid filter: expected a JSON object (e.g. {"model": "BlogPage"})'))
+            return None
+        return parsed
 
     def _display_config(self, options):
         """Display effective configuration from Django settings and CLI flags."""
@@ -143,10 +155,10 @@ class Command(BaseCommand):
     def _handle_single_question(self, chatbot, question, session_id, no_history, no_sources):
         """Handle single question mode."""
         try:
-            # Prepare query kwargs
-            query_kwargs = {}
-            if not no_history and getattr(settings, 'WAGTAIL_RAG_ENABLE_CHAT_HISTORY', True):
-                query_kwargs['session_id'] = session_id or uuid.uuid4().hex
+            query_kwargs = self._build_query_kwargs(
+                use_history=(not no_history),
+                session_id=session_id,
+            )
 
             # Query chatbot
             self.stdout.write(self.style.WARNING(f'\nQuestion: {question}\n'))
@@ -194,11 +206,13 @@ class Command(BaseCommand):
                     continue
 
                 # Handle commands
-                if question.lower() in ['exit', 'quit']:
+                lower_question = question.lower()
+
+                if lower_question in EXIT_COMMANDS:
                     self.stdout.write(self.style.SUCCESS('\nGoodbye!'))
                     break
 
-                if question.lower() == 'clear':
+                if lower_question == 'clear':
                     if use_history:
                         session_id = uuid.uuid4().hex[:8]
                         self.stdout.write(self.style.SUCCESS(f'New session started: {session_id}\n'))
@@ -207,10 +221,10 @@ class Command(BaseCommand):
                     continue
 
                 # Handle sources toggle command
-                parts = question.lower().split()
+                parts = lower_question.split()
                 if parts and parts[0] == 'sources':
                     if len(parts) != 2:
-                        self.stdout.write(self.style.ERROR('Usage: sources on|off\n'))
+                        self.stdout.write(self.style.ERROR(SOURCES_USAGE))
                         continue
                     toggle = parts[1]
                     if toggle == 'on':
@@ -220,14 +234,13 @@ class Command(BaseCommand):
                         show_sources = False
                         self.stdout.write(self.style.SUCCESS('Sources display: OFF\n'))
                     else:
-                        self.stdout.write(self.style.ERROR('Usage: sources on|off\n'))
+                        self.stdout.write(self.style.ERROR(SOURCES_USAGE))
                     continue
 
-                # Query chatbot
-                query_kwargs = {}
-                if use_history:
-                    query_kwargs['session_id'] = session_id
-
+                query_kwargs = self._build_query_kwargs(
+                    use_history=use_history,
+                    session_id=session_id,
+                )
                 result = chatbot.query(question, **query_kwargs)
 
                 # Display answer
@@ -248,6 +261,14 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.ERROR(f'\nError: {e}'))
                 traceback.print_exc()
                 self.stdout.write('')
+
+    @staticmethod
+    def _build_query_kwargs(use_history: bool, session_id: Optional[str]) -> Dict[str, str]:
+        """Build kwargs for chatbot.query based on history mode."""
+        query_kwargs: Dict[str, str] = {}
+        if use_history and getattr(settings, 'WAGTAIL_RAG_ENABLE_CHAT_HISTORY', True):
+            query_kwargs['session_id'] = session_id or uuid.uuid4().hex
+        return query_kwargs
 
     def _display_sources(self, sources):
         """Display source documents."""
