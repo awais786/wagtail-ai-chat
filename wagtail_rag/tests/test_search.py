@@ -89,7 +89,9 @@ class TestHybridSearch(unittest.TestCase):
                     self.metadata = metadata
 
             mock_vector_doc1 = MockDoc("Content 1", {"page_id": 1, "title": "Test"})
-            mock_vector_doc2 = MockDoc("Content 2", {"page_id": 1, "title": "Test"})  # Duplicate
+            mock_vector_doc2 = MockDoc(
+                "Content 2", {"page_id": 1, "title": "Test"}
+            )  # Duplicate
 
             mock_vector_store = MagicMock()
             mock_retriever = MagicMock()

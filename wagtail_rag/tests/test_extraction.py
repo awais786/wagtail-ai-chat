@@ -25,6 +25,7 @@ class TestWagtailAPIExtractor(unittest.TestCase):
 
     def test_get_page_url_fallback(self):
         """Test URL extraction falls back to url attribute."""
+
         class MockPage:
             pass
 
@@ -36,6 +37,7 @@ class TestWagtailAPIExtractor(unittest.TestCase):
 
     def test_get_page_url_final_fallback(self):
         """Test URL extraction final fallback to page ID."""
+
         class MockPage:
             pass
 
