@@ -95,6 +95,7 @@ setup(
         ],
         # Test dependencies
         "test": [
+            "wagtail>=6.0.0",
             "pytest>=7.0.0",
             "pytest-django>=4.5.0",
             "pytest-cov>=4.0.0",
