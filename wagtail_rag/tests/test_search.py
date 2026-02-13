@@ -82,14 +82,14 @@ class TestHybridSearch(unittest.TestCase):
             mock_settings.WAGTAIL_RAG_ENABLE_HYBRID_SEARCH = True
             mock_settings.WAGTAIL_RAG_MAX_RESULTS = 10
 
-            # Create duplicate page_id in results
-            mock_vector_doc1 = MagicMock()
-            mock_vector_doc1.page_content = "Content 1"
-            mock_vector_doc1.metadata = {"page_id": 1, "title": "Test"}
+            # Create mock documents with duplicate page_id
+            class MockDoc:
+                def __init__(self, page_content, metadata):
+                    self.page_content = page_content
+                    self.metadata = metadata
 
-            mock_vector_doc2 = MagicMock()
-            mock_vector_doc2.page_content = "Content 2"
-            mock_vector_doc2.metadata = {"page_id": 1, "title": "Test"}  # Duplicate
+            mock_vector_doc1 = MockDoc("Content 1", {"page_id": 1, "title": "Test"})
+            mock_vector_doc2 = MockDoc("Content 2", {"page_id": 1, "title": "Test"})  # Duplicate
 
             mock_vector_store = MagicMock()
             mock_retriever = MagicMock()
