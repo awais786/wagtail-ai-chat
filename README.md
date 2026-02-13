@@ -553,6 +553,59 @@ WAGTAIL_RAG_OLLAMA_MODEL_NAME = 'mistral'
   - **Ollama**: `pip install wagtail-rag[ollama]`
   - **All providers**: `pip install wagtail-rag[all]`
 
+## Testing
+
+### Running Tests
+
+The package includes a comprehensive test suite covering core functionality.
+
+**Install test dependencies:**
+```bash
+pip install -e ".[test]"
+```
+
+**Run all tests:**
+```bash
+pytest
+```
+
+**Run with coverage:**
+```bash
+pytest --cov=wagtail_rag --cov-report=html --cov-report=term
+```
+
+**Run specific test modules:**
+```bash
+# Test providers
+pytest wagtail_rag/tests/test_providers.py
+
+# Test content extraction
+pytest wagtail_rag/tests/test_extraction.py
+
+# Test API views
+pytest wagtail_rag/tests/test_api_views.py
+
+# Test chat command
+pytest wagtail_rag/tests/test_chat_command.py
+```
+
+**Using tox (test across multiple Python versions):**
+```bash
+pip install tox
+tox
+```
+
+### Test Coverage
+
+The test suite includes:
+- **Provider factories**: LLM and embedding provider initialization, model resolution, compatibility checks
+- **Content extraction**: Field detection, metadata building, text cleaning
+- **LLM generation**: Prompt templates, context building, chat model detection
+- **Index building**: Field resolution, model parsing helpers
+- **API views**: Request validation, error handling, session management
+- **Chat command**: CLI argument parsing, filter validation, interactive mode
+- **Hybrid search**: Vector search, deduplication, hybrid weighting
+
 ## Requirements
 
 - Python 3.8+

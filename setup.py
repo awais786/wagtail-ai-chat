@@ -88,8 +88,15 @@ setup(
         "dev": [
             "black",
             "flake8",
-            "pytest",
-            "pytest-django",
+            "pytest>=7.0.0",
+            "pytest-django>=4.5.0",
+            "pytest-cov>=4.0.0",
+        ],
+        # Test dependencies
+        "test": [
+            "pytest>=7.0.0",
+            "pytest-django>=4.5.0",
+            "pytest-cov>=4.0.0",
         ],
     },
 )
