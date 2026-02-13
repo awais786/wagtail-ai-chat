@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 # Max POST body size (1MB) to avoid DoS from huge payloads
 MAX_REQUEST_BODY_SIZE = getattr(settings, "WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE", 1024 * 1024)
+# Max question length (chars); 0 = no limit
+MAX_QUESTION_LENGTH = int(getattr(settings, "WAGTAIL_RAG_MAX_QUESTION_LENGTH", 0))
 
 
 @require_http_methods(["GET", "POST"])
@@ -94,6 +96,14 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
         if not question:
             return JsonResponse(
                 {"error": "Question is required. Use 'q' for GET or 'question' for POST."},
+                status=400,
+            )
+
+        if MAX_QUESTION_LENGTH and len(question) > MAX_QUESTION_LENGTH:
+            return JsonResponse(
+                {
+                    "error": f"Question too long (max {MAX_QUESTION_LENGTH} characters).",
+                },
                 status=400,
             )
 
