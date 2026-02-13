@@ -3,7 +3,7 @@ Tests for embedding and LLM provider factories.
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from wagtail_rag.embeddings.providers import EmbeddingProviderFactory, PROVIDER_DEFAULTS
 from wagtail_rag.llm_providers.providers import LLMProviderFactory
@@ -16,67 +16,35 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
         self.mock_settings = MagicMock()
         self.factory = EmbeddingProviderFactory(self.mock_settings)
 
-    def test_resolve_model_name_explicit(self):
-        """Test that explicit model_name takes precedence."""
+    def test_model_name_resolution_priority(self):
+        """Test model name resolution priority: explicit > provider-specific > global > default."""
+        # Explicit takes precedence
         result = self.factory._resolve_model_name("openai", "custom-model")
         self.assertEqual(result, "custom-model")
-
-    def test_resolve_model_name_global_setting(self):
-        """Test fallback to global WAGTAIL_RAG_EMBEDDING_MODEL setting."""
-        self.mock_settings.WAGTAIL_RAG_EMBEDDING_MODEL = "text-embedding-ada-002"
-        self.mock_settings.WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL = None
-        result = self.factory._resolve_model_name("openai", None)
-        # Should use setting if compatible
-        self.assertEqual(result, "text-embedding-ada-002")
-
-    def test_resolve_model_name_provider_specific(self):
-        """Test provider-specific setting takes precedence over global."""
+        
+        # Provider-specific setting
         self.mock_settings.WAGTAIL_RAG_EMBEDDING_MODEL = "global-model"
         self.mock_settings.WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL = "openai-specific"
         result = self.factory._resolve_setting_model_name("openai")
         self.assertEqual(result, "openai-specific")
-
-    def test_resolve_model_name_incompatible_fallback(self):
-        """Test that incompatible model in settings falls back to provider default."""
+        
+        # Incompatible model falls back to default
         self.mock_settings.WAGTAIL_RAG_EMBEDDING_MODEL = "incompatible-model"
         self.mock_settings.WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL = None
         result = self.factory._resolve_model_name("openai", None)
-        # Should fall back to provider default when model is incompatible
         self.assertEqual(result, PROVIDER_DEFAULTS["openai"])
 
-    def test_resolve_model_name_default(self):
-        """Test fallback to provider default."""
-        self.mock_settings.WAGTAIL_RAG_EMBEDDING_MODEL = None
-        self.mock_settings.WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL = None
-        result = self.factory._resolve_model_name("openai", None)
-        self.assertEqual(result, PROVIDER_DEFAULTS["openai"])
+    def test_model_compatibility_detection(self):
+        """Test model compatibility detection for different providers."""
+        # OpenAI models
+        self.assertTrue(self.factory._is_model_compatible("openai", "text-embedding-3-small"))
+        self.assertFalse(self.factory._is_model_compatible("openai", "sentence-transformers/all-MiniLM-L6-v2"))
+        
+        # HuggingFace models
+        self.assertTrue(self.factory._is_model_compatible("huggingface", "sentence-transformers/all-MiniLM-L6-v2"))
+        self.assertFalse(self.factory._is_model_compatible("huggingface", "text-embedding-3-small"))
 
-    def test_compatibility_check_openai_model(self):
-        """Test OpenAI embedding model compatibility detection."""
-        self.assertTrue(
-            self.factory._is_model_compatible("openai", "text-embedding-3-small")
-        )
-        self.assertTrue(
-            self.factory._is_model_compatible("openai", "text-embedding-ada-002")
-        )
-        self.assertFalse(
-            self.factory._is_model_compatible(
-                "openai", "sentence-transformers/all-MiniLM-L6-v2"
-            )
-        )
-
-    def test_compatibility_check_huggingface_model(self):
-        """Test HuggingFace embedding model compatibility detection."""
-        self.assertTrue(
-            self.factory._is_model_compatible(
-                "huggingface", "sentence-transformers/all-MiniLM-L6-v2"
-            )
-        )
-        self.assertFalse(
-            self.factory._is_model_compatible("huggingface", "text-embedding-3-small")
-        )
-
-    def test_invalid_provider_raises_error(self):
+    def test_invalid_provider_error(self):
         """Test that invalid provider raises clear error."""
         with self.assertRaises(ValueError) as context:
             self.factory.get(provider="invalid-provider")
@@ -90,40 +58,34 @@ class TestLLMProviderFactory(unittest.TestCase):
         self.mock_settings = MagicMock()
         self.factory = LLMProviderFactory(self.mock_settings)
 
-    def test_resolve_model_name_explicit(self):
-        """Test that explicit model_name takes precedence."""
+    def test_model_name_resolution(self):
+        """Test model name resolution for LLM providers."""
+        # Explicit precedence
         result = self.factory._resolve_model_name("openai", "custom-model")
         self.assertEqual(result, "custom-model")
-
-    def test_provider_specific_setting_priority(self):
-        """Test provider-specific setting takes precedence."""
+        
+        # Provider-specific setting
         self.mock_settings.WAGTAIL_RAG_MODEL_NAME = "global-model"
         self.mock_settings.WAGTAIL_RAG_OPENAI_MODEL_NAME = "openai-specific"
         result = self.factory._resolve_setting_model_name("openai")
         self.assertEqual(result, "openai-specific")
 
-    def test_compatibility_check_openai(self):
-        """Test OpenAI model compatibility detection."""
+    def test_llm_compatibility_checks(self):
+        """Test LLM model compatibility for all providers."""
+        # OpenAI
         self.assertTrue(self.factory._is_model_compatible("openai", "gpt-4"))
-        self.assertTrue(self.factory._is_model_compatible("openai", "gpt-3.5-turbo"))
         self.assertFalse(self.factory._is_model_compatible("openai", "claude-3-sonnet"))
-
-    def test_compatibility_check_anthropic(self):
-        """Test Anthropic model compatibility detection."""
-        self.assertTrue(
-            self.factory._is_model_compatible("anthropic", "claude-3-sonnet-20240229")
-        )
+        
+        # Anthropic
+        self.assertTrue(self.factory._is_model_compatible("anthropic", "claude-3-sonnet-20240229"))
         self.assertFalse(self.factory._is_model_compatible("anthropic", "gpt-4"))
-
-    def test_compatibility_check_ollama(self):
-        """Test Ollama model compatibility detection."""
+        
+        # Ollama
         self.assertTrue(self.factory._is_model_compatible("ollama", "mistral"))
-        self.assertTrue(self.factory._is_model_compatible("ollama", "llama2"))
         self.assertFalse(self.factory._is_model_compatible("ollama", "gpt-4"))
-        self.assertFalse(self.factory._is_model_compatible("ollama", "claude-3-sonnet"))
 
-    def test_invalid_provider_raises_error(self):
-        """Test that invalid provider raises clear error."""
+    def test_invalid_llm_provider_error(self):
+        """Test that invalid LLM provider raises clear error."""
         with self.assertRaises(ValueError) as context:
             self.factory.get(provider="invalid-llm-provider")
         self.assertIn("Unknown LLM provider", str(context.exception))

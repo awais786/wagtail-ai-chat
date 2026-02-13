@@ -436,11 +436,11 @@ class EmbeddingSearcher:
         else:
             logger.debug(f"Hybrid search disabled")
 
-        # Step 3: Combine and deduplicate results
+        # Step 3: Combine and limit results
         all_docs = vector_docs + wagtail_docs
-        docs = self._deduplicate_documents(all_docs, self.k_value)
+        docs = all_docs[: self.k_value]
         logger.debug(
-            f"Combined: {len(all_docs)} total -> {len(docs)} deduplicated ({len(vector_docs)} vector + {len(wagtail_docs)} wagtail)"
+            f"Combined: {len(all_docs)} total ({len(vector_docs)} vector + {len(wagtail_docs)} wagtail)"
         )
 
         # Step 4: Boost title matches for short queries
@@ -468,26 +468,6 @@ class EmbeddingSearcher:
 
         deduped = list(best_by_key.values())
         return sorted(deduped, key=lambda pair: pair[1])[:k]
-
-    def _deduplicate_documents(self, docs: List[Document], k: int) -> List[Document]:
-        """Deduplicate documents by URL/ID and keep first occurrence per key."""
-        seen_keys: Set[Tuple[str, Optional[Any]]] = set()
-        deduped: List[Document] = []
-
-        for doc in docs:
-            meta = getattr(doc, "metadata", {}) or {}
-            url = meta.get("url") or ""
-            doc_id = meta.get("page_id") or meta.get("id")
-            key = (url, doc_id)
-
-            if key not in seen_keys:
-                seen_keys.add(key)
-                deduped.append(doc)
-
-            if len(deduped) >= k:
-                break
-
-        return deduped
 
     def _apply_conservative_title_boost(
         self, query: str, results: List[Dict[str, Any]], k: int
