@@ -137,7 +137,6 @@ class LLMGenerator:
 
         Returns the constructed chain or None if no retriever or supported chain is available.
         """
-        breakpoint()
         if not self.retriever:
             return None
 
@@ -292,7 +291,6 @@ class LLMGenerator:
     def _invoke_chat_model(self, prompt_text: str) -> str:
         """Invoke a chat model (ChatOllama, ChatOpenAI, etc.) with messages."""
         # Try with HumanMessage wrapper first
-        breakpoint()
         if HUMAN_MESSAGE_AVAILABLE and HumanMessage:
             try:
                 message = HumanMessage(content=prompt_text)

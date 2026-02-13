@@ -54,8 +54,6 @@ class Command(BaseCommand):
 
         # Parse metadata filter if provided
         metadata_filter = self._parse_filter(options.get("filter"))
-        if options.get("filter") and metadata_filter is None:
-            return
 
         # Initialize chatbot (uses Django settings)
         try:
@@ -92,7 +90,7 @@ class Command(BaseCommand):
             parsed = json.loads(filter_value)
         except json.JSONDecodeError as e:
             self.stdout.write(self.style.ERROR(f"Invalid JSON filter: {e}"))
-            return None
+            raise SystemExit(1)
 
         if not isinstance(parsed, dict):
             self.stdout.write(
@@ -100,7 +98,7 @@ class Command(BaseCommand):
                     'Invalid filter: expected a JSON object (e.g. {"model": "BlogPage"})'
                 )
             )
-            return None
+            raise SystemExit(1)
         return parsed
 
     def _display_config(self, options):

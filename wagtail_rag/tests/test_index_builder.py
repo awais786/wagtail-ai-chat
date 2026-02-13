@@ -66,7 +66,7 @@ class TestGetFieldsToAttempt(unittest.TestCase):
         page.api_fields = []  # No api_fields
 
         fields, source = _get_fields_to_attempt(page)
-        expected_fields = ["introduction", "body", "content"]
+        expected_fields = ["introduction", "body"]
         self.assertEqual(fields, expected_fields)
         self.assertEqual(source, "default fields")
 

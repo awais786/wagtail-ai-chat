@@ -119,7 +119,7 @@ class TestChatAPI(TestCase):
         request = self.factory.post(
             "/api/rag/chat/",
             data=json.dumps(
-                {"question": "test question", "metadata_filter": {"model": "BlogPage"}}
+                {"question": "test question", "filter": {"model": "BlogPage"}}
             ),
             content_type="application/json",
         )

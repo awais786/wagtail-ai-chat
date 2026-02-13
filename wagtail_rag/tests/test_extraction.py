@@ -26,7 +26,8 @@ class TestWagtailAPIExtractor(unittest.TestCase):
     def test_get_page_url_fallback(self):
         """Test URL extraction falls back to url attribute."""
         page = MagicMock()
-        page.full_url = MagicMock(side_effect=AttributeError)
+        # Simulate full_url not existing by making it raise AttributeError
+        type(page).full_url = property(lambda self: (_ for _ in ()).throw(AttributeError()))
         page.url = "/page/"
         url = WagtailAPIExtractor._get_page_url(page)
         self.assertEqual(url, "/page/")
@@ -34,8 +35,9 @@ class TestWagtailAPIExtractor(unittest.TestCase):
     def test_get_page_url_final_fallback(self):
         """Test URL extraction final fallback to page ID."""
         page = MagicMock()
-        page.full_url = MagicMock(side_effect=AttributeError)
-        page.url = MagicMock(side_effect=AttributeError)
+        # Simulate both full_url and url not existing
+        type(page).full_url = property(lambda self: (_ for _ in ()).throw(AttributeError()))
+        type(page).url = property(lambda self: (_ for _ in ()).throw(AttributeError()))
         page.id = 123
         url = WagtailAPIExtractor._get_page_url(page)
         self.assertEqual(url, "/page/123/")
