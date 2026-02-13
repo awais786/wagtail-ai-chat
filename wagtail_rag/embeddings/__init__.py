@@ -9,5 +9,9 @@ This package contains:
 from .providers import get_embeddings, EmbeddingProviderFactory, BaseEmbeddingProvider
 from .search import EmbeddingSearcher
 
-__all__ = ['get_embeddings', 'EmbeddingSearcher', 'EmbeddingProviderFactory', 'BaseEmbeddingProvider']
-
+__all__ = [
+    "get_embeddings",
+    "EmbeddingSearcher",
+    "EmbeddingProviderFactory",
+    "BaseEmbeddingProvider",
+]

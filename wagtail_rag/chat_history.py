@@ -4,6 +4,7 @@ Server-side chat history with summarization for multi-turn conversations.
 Keeps the most recent messages verbatim and summarizes older turns into a
 single system message to keep context compact.
 """
+
 from __future__ import annotations
 
 import threading
@@ -24,7 +25,11 @@ def _format_messages(messages: List[BaseMessage]) -> str:
         content = getattr(msg, "content", "") or ""
         if not content:
             continue
-        label = "User" if role == "human" else "Assistant" if role == "ai" else role.capitalize()
+        label = (
+            "User"
+            if role == "human"
+            else "Assistant" if role == "ai" else role.capitalize()
+        )
         lines.append(f"{label}: {content}")
     return "\n".join(lines)
 
@@ -45,7 +50,11 @@ class SummarizingChatMessageHistory(BaseChatMessageHistory):
         with self._lock:
             items: List[BaseMessage] = []
             if self._summary:
-                items.append(SystemMessage(content=f"Summary of earlier conversation:\n{self._summary}"))
+                items.append(
+                    SystemMessage(
+                        content=f"Summary of earlier conversation:\n{self._summary}"
+                    )
+                )
             items.extend(self._messages)
             return list(items)
 
@@ -57,7 +66,7 @@ class SummarizingChatMessageHistory(BaseChatMessageHistory):
                 return
             if len(self._messages) <= self._recent_window:
                 return
-            older = self._messages[:-self._recent_window]
+            older = self._messages[: -self._recent_window]
             older_text = _format_messages(older)
             if older_text:
                 try:
@@ -72,6 +81,7 @@ class SummarizingChatMessageHistory(BaseChatMessageHistory):
         with self._lock:
             self._summary = ""
             self._messages = []
+
 
 class SummarizingHistoryStore:
     """In-memory store for per-session chat histories."""
@@ -98,10 +108,13 @@ class SummarizingHistoryStore:
                 self._store[session_id] = history
             return history
 
+
 _HISTORY_STORE: Optional[SummarizingHistoryStore] = None
 
 
-def get_history_store(summarize_fn: SummarizeFn, recent_window: int) -> SummarizingHistoryStore:
+def get_history_store(
+    summarize_fn: SummarizeFn, recent_window: int
+) -> SummarizingHistoryStore:
     """Return a singleton history store."""
     global _HISTORY_STORE
     if _HISTORY_STORE is None:

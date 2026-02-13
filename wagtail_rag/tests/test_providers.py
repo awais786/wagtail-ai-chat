@@ -1,6 +1,7 @@
 """
 Tests for embedding and LLM provider factories.
 """
+
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -52,14 +53,28 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
 
     def test_compatibility_check_openai_model(self):
         """Test OpenAI embedding model compatibility detection."""
-        self.assertTrue(self.factory._is_model_compatible("openai", "text-embedding-3-small"))
-        self.assertTrue(self.factory._is_model_compatible("openai", "text-embedding-ada-002"))
-        self.assertFalse(self.factory._is_model_compatible("openai", "sentence-transformers/all-MiniLM-L6-v2"))
+        self.assertTrue(
+            self.factory._is_model_compatible("openai", "text-embedding-3-small")
+        )
+        self.assertTrue(
+            self.factory._is_model_compatible("openai", "text-embedding-ada-002")
+        )
+        self.assertFalse(
+            self.factory._is_model_compatible(
+                "openai", "sentence-transformers/all-MiniLM-L6-v2"
+            )
+        )
 
     def test_compatibility_check_huggingface_model(self):
         """Test HuggingFace embedding model compatibility detection."""
-        self.assertTrue(self.factory._is_model_compatible("huggingface", "sentence-transformers/all-MiniLM-L6-v2"))
-        self.assertFalse(self.factory._is_model_compatible("huggingface", "text-embedding-3-small"))
+        self.assertTrue(
+            self.factory._is_model_compatible(
+                "huggingface", "sentence-transformers/all-MiniLM-L6-v2"
+            )
+        )
+        self.assertFalse(
+            self.factory._is_model_compatible("huggingface", "text-embedding-3-small")
+        )
 
     def test_invalid_provider_raises_error(self):
         """Test that invalid provider raises clear error."""
@@ -95,7 +110,9 @@ class TestLLMProviderFactory(unittest.TestCase):
 
     def test_compatibility_check_anthropic(self):
         """Test Anthropic model compatibility detection."""
-        self.assertTrue(self.factory._is_model_compatible("anthropic", "claude-3-sonnet-20240229"))
+        self.assertTrue(
+            self.factory._is_model_compatible("anthropic", "claude-3-sonnet-20240229")
+        )
         self.assertFalse(self.factory._is_model_compatible("anthropic", "gpt-4"))
 
     def test_compatibility_check_ollama(self):
@@ -112,5 +129,5 @@ class TestLLMProviderFactory(unittest.TestCase):
         self.assertIn("Unknown LLM provider", str(context.exception))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

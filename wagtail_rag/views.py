@@ -3,6 +3,7 @@ API views for RAG chatbot.
 
 This module provides API endpoints for querying the RAG chatbot.
 """
+
 import json
 import logging
 import uuid
@@ -19,7 +20,9 @@ from .rag_chatbot import get_chatbot
 logger = logging.getLogger(__name__)
 
 # Max POST body size (1MB) to avoid DoS from huge payloads
-MAX_REQUEST_BODY_SIZE = getattr(settings, "WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE", 1024 * 1024)
+MAX_REQUEST_BODY_SIZE = getattr(
+    settings, "WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE", 1024 * 1024
+)
 # Max question length (chars); 0 = no limit
 MAX_QUESTION_LENGTH = int(getattr(settings, "WAGTAIL_RAG_MAX_QUESTION_LENGTH", 0))
 
@@ -76,12 +79,16 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             body = request.body
             if len(body) > MAX_REQUEST_BODY_SIZE:
                 return JsonResponse(
-                    {"error": f"Request body too large (max {MAX_REQUEST_BODY_SIZE} bytes)."},
+                    {
+                        "error": f"Request body too large (max {MAX_REQUEST_BODY_SIZE} bytes)."
+                    },
                     status=413,
                 )
             if not body or not body.strip():
                 return JsonResponse(
-                    {"error": "POST body must be non-empty JSON with a 'question' field."},
+                    {
+                        "error": "POST body must be non-empty JSON with a 'question' field."
+                    },
                     status=400,
                 )
             try:
@@ -95,7 +102,9 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
 
         if not question:
             return JsonResponse(
-                {"error": "Question is required. Use 'q' for GET or 'question' for POST."},
+                {
+                    "error": "Question is required. Use 'q' for GET or 'question' for POST."
+                },
                 status=400,
             )
 
@@ -130,7 +139,9 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
 
     except Exception:
         logger.exception("RAG chat API error")
-        return JsonResponse({"error": "An error occurred processing your request."}, status=500)
+        return JsonResponse(
+            {"error": "An error occurred processing your request."}, status=500
+        )
 
 
 def rag_chatbox_widget(request: HttpRequest) -> HttpResponse:

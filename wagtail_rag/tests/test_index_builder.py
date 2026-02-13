@@ -1,6 +1,7 @@
 """
 Tests for index building functionality.
 """
+
 import unittest
 from unittest.mock import MagicMock
 
@@ -18,12 +19,12 @@ class TestParseModelFieldsShorthand(unittest.TestCase):
         """Test parsing model names with :* suffix."""
         model_names = ["blog.BlogPage", "breads.BreadPage:*", "locations.LocationPage"]
         cleaned, auto_fields = _parse_model_fields_shorthand(model_names)
-        
+
         self.assertEqual(len(cleaned), 3)
         self.assertIn("blog.BlogPage", cleaned)
         self.assertIn("breads.BreadPage", cleaned)
         self.assertIn("locations.LocationPage", cleaned)
-        
+
         self.assertIsNotNone(auto_fields)
         self.assertEqual(len(auto_fields), 1)
         self.assertIn("breads.BreadPage:*", auto_fields)
@@ -32,7 +33,7 @@ class TestParseModelFieldsShorthand(unittest.TestCase):
         """Test parsing model names without :* suffix."""
         model_names = ["blog.BlogPage", "breads.BreadPage"]
         cleaned, auto_fields = _parse_model_fields_shorthand(model_names)
-        
+
         self.assertEqual(len(cleaned), 2)
         self.assertIsNone(auto_fields)
 
@@ -65,7 +66,7 @@ class TestGetFieldsToAttempt(unittest.TestCase):
         page.api_fields = []  # No api_fields
 
         fields, source = _get_fields_to_attempt(page)
-        expected_fields = ['introduction', 'body', 'content']
+        expected_fields = ["introduction", "body", "content"]
         self.assertEqual(fields, expected_fields)
         self.assertEqual(source, "default fields")
 
@@ -79,5 +80,5 @@ class TestConstants(unittest.TestCase):
         self.assertEqual(len(STEP_SEPARATOR), 80)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

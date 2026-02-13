@@ -1,6 +1,7 @@
 """
 Tests for content extraction functionality.
 """
+
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -8,7 +9,7 @@ from wagtail_rag.content_extraction.api_fields_extractor import (
     WagtailAPIExtractor,
     DEFAULT_FIELDS,
     SYSTEM_FIELDS,
-    CORE_SKIP_FIELDS
+    CORE_SKIP_FIELDS,
 )
 
 
@@ -70,7 +71,7 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         field2 = MagicMock()
         field2.name = "introduction"
         page.api_fields = [field1, field2]
-        
+
         fields, source = WagtailAPIExtractor._resolve_candidate_fields(page)
         self.assertEqual(fields, ["body", "introduction"])
         self.assertIn("api_fields", source)
@@ -79,8 +80,10 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         """Test field resolution falls back to defaults."""
         page = MagicMock()
         page.api_fields = []
-        
-        with patch('wagtail_rag.content_extraction.api_fields_extractor.settings') as mock_settings:
+
+        with patch(
+            "wagtail_rag.content_extraction.api_fields_extractor.settings"
+        ) as mock_settings:
             mock_settings.WAGTAIL_RAG_DEFAULT_FIELDS = DEFAULT_FIELDS
             fields, source = WagtailAPIExtractor._resolve_candidate_fields(page)
             self.assertEqual(fields, DEFAULT_FIELDS)
@@ -94,9 +97,9 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         page.slug = "test-page"
         page.full_url = "https://example.com/test/"
         page.last_published_at = None
-        
+
         metadata = WagtailAPIExtractor._build_metadata(page)
-        
+
         self.assertEqual(metadata["page_id"], 123)
         self.assertEqual(metadata["title"], "Test Page")
         self.assertEqual(metadata["slug"], "test-page")
@@ -110,19 +113,19 @@ class TestConstants(unittest.TestCase):
         """Test DEFAULT_FIELDS constant."""
         self.assertIsInstance(DEFAULT_FIELDS, list)
         self.assertGreater(len(DEFAULT_FIELDS), 0)
-        self.assertIn('body', DEFAULT_FIELDS)
+        self.assertIn("body", DEFAULT_FIELDS)
 
     def test_system_fields_defined(self):
         """Test SYSTEM_FIELDS constant."""
         self.assertIsInstance(SYSTEM_FIELDS, set)
         self.assertGreater(len(SYSTEM_FIELDS), 0)
-        self.assertIn('id', SYSTEM_FIELDS)
-        self.assertIn('slug', SYSTEM_FIELDS)
+        self.assertIn("id", SYSTEM_FIELDS)
+        self.assertIn("slug", SYSTEM_FIELDS)
 
     def test_core_skip_fields_subset_of_system(self):
         """Test CORE_SKIP_FIELDS is a subset of SYSTEM_FIELDS."""
         self.assertTrue(CORE_SKIP_FIELDS.issubset(SYSTEM_FIELDS))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

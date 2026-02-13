@@ -1,6 +1,7 @@
 """
 Setup configuration for Wagtail RAG package.
 """
+
 from setuptools import find_packages, setup
 
 with open("README.md", "r", encoding="utf-8") as fh:
@@ -14,10 +15,10 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/awais786/wagtail-ai-chat",
-    packages=find_packages(exclude=['tests', 'tests.*']),
+    packages=find_packages(exclude=["tests", "tests.*"]),
     include_package_data=True,
     package_data={
-        'wagtail_rag': ['templates/**/*.html'],
+        "wagtail_rag": ["templates/**/*.html"],
     },
     classifiers=[
         "Development Status :: 3 - Alpha",
