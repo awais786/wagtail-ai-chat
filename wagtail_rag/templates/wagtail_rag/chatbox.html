@@ -1,360 +1,381 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RAG Chatbox</title>
-    <style>
-        /* Themeable CSS Variables - Override these in your site's CSS */
-        :root {
-            --chatbox-primary: #667eea;
-            --chatbox-primary-dark: #5568d3;
-            --chatbox-secondary: #764ba2;
-            --chatbox-bg: white;
-            --chatbox-body-bg: #f5f5f5;
-            --chatbox-border: #e9ecef;
-            --chatbox-text: #212529;
-            --chatbox-text-muted: #6c757d;
-            --chatbox-user-bg: #667eea;
-            --chatbox-user-text: white;
-            --chatbox-bot-bg: #f1f3f5;
-            --chatbox-bot-text: #212529;
-            --chatbox-error-bg: #fee;
-            --chatbox-error-text: #c33;
-            --chatbox-error-border: #fcc;
-            --chatbox-link: #667eea;
-            --chatbox-disabled: #ccc;
-            --chatbox-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            --chatbox-border-radius: 12px;
-            --chatbox-border-radius-lg: 18px;
-            --chatbox-border-radius-pill: 24px;
-            --chatbox-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
+{% comment %}
+Wagtail RAG chatbox widget — include this as a partial, not a standalone page.
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: var(--chatbox-font-family);
-            background: var(--chatbox-body-bg);
-            padding: 20px;
-        }
-
-        .chatbox-container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: var(--chatbox-bg);
-            border-radius: var(--chatbox-border-radius);
-            box-shadow: var(--chatbox-shadow);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            height: 600px;
-        }
-
-        .chatbox-header {
-            background: linear-gradient(135deg, var(--chatbox-primary) 0%, var(--chatbox-secondary) 100%);
-            color: var(--chatbox-user-text);
-            padding: 20px;
-            text-align: center;
-        }
-
-        .chatbox-header h2 {
-            font-size: 20px;
-            font-weight: 600;
-        }
-
-
-        .chatbox-messages {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            background: var(--chatbox-bg);
-        }
-
-        .message {
-            margin-bottom: 16px;
-            animation: fadeIn 0.3s;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .message.user {
-            text-align: right;
-        }
-
-        .message.bot {
-            text-align: left;
-        }
-
-        .message-content {
-            display: inline-block;
-            max-width: 80%;
-            padding: 12px 16px;
-            border-radius: var(--chatbox-border-radius-lg);
-            word-wrap: break-word;
-        }
-
-        .message.user .message-content {
-            background: var(--chatbox-user-bg);
-            color: var(--chatbox-user-text);
-            border-bottom-right-radius: 4px;
-        }
-
-        .message.bot .message-content {
-            background: var(--chatbox-bot-bg);
-            color: var(--chatbox-bot-text);
-            border-bottom-left-radius: 4px;
-        }
-
-        .message.bot .message-content.error {
-            background: var(--chatbox-error-bg);
-            color: var(--chatbox-error-text);
-            border: 1px solid var(--chatbox-error-border);
-        }
-
-        .sources {
-            margin-top: 8px;
-            font-size: 12px;
-            color: var(--chatbox-text-muted);
-        }
-
-        .sources a {
-            color: var(--chatbox-link);
-            text-decoration: none;
-        }
-
-        .sources a:hover {
-            text-decoration: underline;
-        }
-
-
-        .chatbox-input-container {
-            padding: 16px;
-            background: var(--chatbox-bg);
-            border-top: 1px solid var(--chatbox-border);
-        }
-
-        .input-wrapper {
-            display: flex;
-            gap: 8px;
-        }
-
-        .chatbox-input {
-            flex: 1;
-            padding: 12px 16px;
-            border: 2px solid var(--chatbox-border);
-            border-radius: var(--chatbox-border-radius-pill);
-            font-size: 14px;
-            outline: none;
-            transition: border-color 0.3s;
-            font-family: var(--chatbox-font-family);
-        }
-
-        .chatbox-input:focus {
-            border-color: var(--chatbox-primary);
-        }
-
-        .send-button {
-            padding: 12px 24px;
-            background: var(--chatbox-primary);
-            color: var(--chatbox-user-text);
-            border: none;
-            border-radius: var(--chatbox-border-radius-pill);
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: background 0.3s;
-            font-family: var(--chatbox-font-family);
-        }
-
-        .send-button:hover:not(:disabled) {
-            background: var(--chatbox-primary-dark);
-        }
-
-        .send-button:disabled {
-            background: var(--chatbox-disabled);
-            cursor: not-allowed;
-        }
-
-        .loading {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid var(--chatbox-primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .empty-state {
-            text-align: center;
-            color: var(--chatbox-text-muted);
-            padding: 40px 20px;
-        }
-
-        .empty-state-icon {
-            font-size: 48px;
-            margin-bottom: 12px;
-        }
-    </style>
-</head>
-<body>
-    <div class="chatbox-container">
-        <div class="chatbox-header">
-            <h2>Ask Me Anything</h2>
-        </div>
-
-        <div class="chatbox-messages" id="messages">
-            <div class="empty-state">
-                <div class="empty-state-icon">💭</div>
-                <p>Start a conversation!</p>
-            </div>
-        </div>
-
-        <div class="chatbox-input-container">
-            <div class="input-wrapper">
-                <input 
-                    type="text" 
-                    class="chatbox-input" 
-                    id="userInput" 
-                    placeholder="Type your question..."
-                    autocomplete="off"
-                >
-                <button class="send-button" id="sendButton">Send</button>
-            </div>
-        </div>
+Usage in base.html:
+    <div style="position:fixed;bottom:1rem;right:1rem;z-index:9999;">
+        {% include "wagtail_rag/chatbox.html" %}
     </div>
 
-    <script>
-        const API_BASE = '/api/rag';
-        const CHAT_API = `${API_BASE}/chat/`;
+Theming: override CSS custom properties in your site's stylesheet, e.g.:
+    #rag-chatbox-root { --chatbox-primary: #your-brand-color; }
+{% endcomment %}
 
-        const messagesContainer = document.getElementById('messages');
-        const userInput = document.getElementById('userInput');
-        const sendButton = document.getElementById('sendButton');
+<div id="rag-chatbox-root">
+  <style>
+    /* Scoped to #rag-chatbox-root — does not affect the host page */
+    #rag-chatbox-root {
+      --chatbox-primary:         #667eea;
+      --chatbox-primary-dark:    #5568d3;
+      --chatbox-secondary:       #764ba2;
+      --chatbox-bg:              #ffffff;
+      --chatbox-border:          #e9ecef;
+      --chatbox-text:            #212529;
+      --chatbox-text-muted:      #6c757d;
+      --chatbox-user-bg:         #667eea;
+      --chatbox-user-text:       #ffffff;
+      --chatbox-bot-bg:          #f1f3f5;
+      --chatbox-bot-text:        #212529;
+      --chatbox-error-bg:        #fff0f0;
+      --chatbox-error-text:      #c0392b;
+      --chatbox-error-border:    #f5c6cb;
+      --chatbox-link:            #667eea;
+      --chatbox-disabled:        #cccccc;
+      --chatbox-font:            -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --chatbox-radius:          12px;
+      --chatbox-radius-lg:       18px;
+      --chatbox-radius-pill:     24px;
+      --chatbox-shadow:          0 4px 20px rgba(0,0,0,0.15);
 
-        const SESSION_KEY = 'ragChatSessionId';
-        let sessionId = sessionStorage.getItem(SESSION_KEY);
+      font-family: var(--chatbox-font);
+      box-sizing: border-box;
+    }
 
-        function generateSessionId() {
-            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-                return window.crypto.randomUUID();
-            }
-            return `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-        }
+    #rag-chatbox-root *, #rag-chatbox-root *::before, #rag-chatbox-root *::after {
+      box-sizing: inherit;
+      margin: 0;
+      padding: 0;
+    }
 
-        function ensureSessionId() {
-            if (!sessionId) {
-                sessionId = generateSessionId();
-                sessionStorage.setItem(SESSION_KEY, sessionId);
-            }
-        }
+    #rag-chatbox-root .cb-container {
+      width: 360px;
+      background: var(--chatbox-bg);
+      border-radius: var(--chatbox-radius);
+      box-shadow: var(--chatbox-shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 520px;
+    }
 
-        // Send message
-        function sendMessage() {
-            const query = userInput.value.trim();
-            if (!query) return;
+    #rag-chatbox-root .cb-header {
+      background: linear-gradient(135deg, var(--chatbox-primary) 0%, var(--chatbox-secondary) 100%);
+      color: var(--chatbox-user-text);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
 
-            // Clear empty state
-            const emptyState = messagesContainer.querySelector('.empty-state');
-            if (emptyState) emptyState.remove();
+    #rag-chatbox-root .cb-header h2 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--chatbox-user-text);
+    }
 
-            ensureSessionId();
+    #rag-chatbox-root .cb-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      background: var(--chatbox-bg);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
 
-            // Add user message
-            addMessage(query, 'user');
+    #rag-chatbox-root .cb-empty {
+      text-align: center;
+      color: var(--chatbox-text-muted);
+      padding: 40px 20px;
+      font-size: 14px;
+    }
 
-            // Clear input and disable button
-            userInput.value = '';
-            sendButton.disabled = true;
-            sendButton.innerHTML = '<div class="loading"></div>';
+    #rag-chatbox-root .cb-message {
+      display: flex;
+      flex-direction: column;
+      animation: cb-fade-in 0.25s ease;
+    }
 
-            // Call chat API
-            callChatAPI(query);
-        }
+    @keyframes cb-fade-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
 
-        // Add message to UI
-        function addMessage(content, type, metadata = null) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${type}`;
+    #rag-chatbox-root .cb-message.user { align-items: flex-end; }
+    #rag-chatbox-root .cb-message.bot  { align-items: flex-start; }
 
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'message-content';
-            contentDiv.textContent = content;
-            messageDiv.appendChild(contentDiv);
+    #rag-chatbox-root .cb-bubble {
+      max-width: 82%;
+      padding: 10px 14px;
+      border-radius: var(--chatbox-radius-lg);
+      font-size: 14px;
+      line-height: 1.5;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
 
-            if (metadata && type === 'bot') {
-                if (metadata.sources && metadata.sources.length > 0) {
-                    const sourcesDiv = document.createElement('div');
-                    sourcesDiv.className = 'sources';
-                    sourcesDiv.innerHTML = `<strong>Sources:</strong> `;
-                    const sourceLinks = metadata.sources.map((source, idx) => {
-                        const url = source.metadata?.url || '#';
-                        const title = source.metadata?.title || `Source ${idx + 1}`;
-                        return `<a href="${url}" target="_blank">${title}</a>`;
-                    }).join(', ');
-                    sourcesDiv.innerHTML += sourceLinks;
-                    messageDiv.appendChild(sourcesDiv);
-                }
-            }
+    #rag-chatbox-root .cb-message.user .cb-bubble {
+      background: var(--chatbox-user-bg);
+      color: var(--chatbox-user-text);
+      border-bottom-right-radius: 4px;
+    }
 
-            messagesContainer.appendChild(messageDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
+    #rag-chatbox-root .cb-message.bot .cb-bubble {
+      background: var(--chatbox-bot-bg);
+      color: var(--chatbox-bot-text);
+      border-bottom-left-radius: 4px;
+    }
 
-        // Call Chat API
-        async function callChatAPI(question) {
-            try {
-                const response = await fetch(CHAT_API, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ question, session_id: sessionId })
-                });
+    #rag-chatbox-root .cb-message.bot .cb-bubble.error {
+      background: var(--chatbox-error-bg);
+      color: var(--chatbox-error-text);
+      border: 1px solid var(--chatbox-error-border);
+    }
 
-                const data = await response.json();
+    #rag-chatbox-root .cb-sources {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--chatbox-text-muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      max-width: 82%;
+    }
 
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to get response');
-                }
+    #rag-chatbox-root .cb-sources span { font-weight: 600; }
 
-                if (data.session_id) {
-                    sessionId = data.session_id;
-                    sessionStorage.setItem(SESSION_KEY, sessionId);
-                }
+    #rag-chatbox-root .cb-sources a {
+      color: var(--chatbox-link);
+      text-decoration: none;
+    }
 
-                addMessage(data.answer, 'bot', { sources: data.sources });
-            } catch (error) {
-                addMessage(`Error: ${error.message}`, 'bot');
-                const errorDiv = messagesContainer.querySelector('.message.bot:last-child .message-content');
-                if (errorDiv) errorDiv.classList.add('error');
-            } finally {
-                sendButton.disabled = false;
-                sendButton.textContent = 'Send';
-                userInput.focus();
-            }
-        }
+    #rag-chatbox-root .cb-sources a:hover { text-decoration: underline; }
 
-        // Event listeners
-        sendButton.addEventListener('click', sendMessage);
-        userInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !sendButton.disabled) {
-                sendMessage();
-            }
+    #rag-chatbox-root .cb-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--chatbox-border);
+      background: var(--chatbox-bg);
+    }
+
+    #rag-chatbox-root .cb-input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    #rag-chatbox-root .cb-input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 2px solid var(--chatbox-border);
+      border-radius: var(--chatbox-radius-pill);
+      font-size: 14px;
+      font-family: var(--chatbox-font);
+      outline: none;
+      transition: border-color 0.2s;
+      color: var(--chatbox-text);
+      background: var(--chatbox-bg);
+    }
+
+    #rag-chatbox-root .cb-input:focus { border-color: var(--chatbox-primary); }
+
+    #rag-chatbox-root .cb-send {
+      padding: 10px 20px;
+      background: var(--chatbox-primary);
+      color: var(--chatbox-user-text);
+      border: none;
+      border-radius: var(--chatbox-radius-pill);
+      font-size: 14px;
+      font-weight: 600;
+      font-family: var(--chatbox-font);
+      cursor: pointer;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
+
+    #rag-chatbox-root .cb-send:hover:not(:disabled) { background: var(--chatbox-primary-dark); }
+
+    #rag-chatbox-root .cb-send:disabled {
+      background: var(--chatbox-disabled);
+      cursor: not-allowed;
+    }
+
+    #rag-chatbox-root .cb-spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: cb-spin 0.7s linear infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes cb-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+
+  <div class="cb-container">
+    <div class="cb-header">
+      <h2>Ask Me Anything</h2>
+    </div>
+
+    <div class="cb-messages" id="cb-messages">
+      <div class="cb-empty" id="cb-empty">Ask a question to get started.</div>
+    </div>
+
+    <div class="cb-footer">
+      <div class="cb-input-row">
+        <input
+          type="text"
+          class="cb-input"
+          id="cb-input"
+          placeholder="Type your question…"
+          autocomplete="off"
+          maxlength="2000"
+          aria-label="Chat input"
+        >
+        <button class="cb-send" id="cb-send" aria-label="Send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    var CHAT_API = '/api/rag/chat/';
+    var SESSION_KEY = 'ragChatSessionId';
+    var MAX_SOURCES = 3;
+
+    var messages  = document.getElementById('cb-messages');
+    var input     = document.getElementById('cb-input');
+    var sendBtn   = document.getElementById('cb-send');
+    var emptyNote = document.getElementById('cb-empty');
+
+    /* ── session ──────────────────────────────────────────────────── */
+    var sessionId = sessionStorage.getItem(SESSION_KEY);
+
+    function ensureSession() {
+      if (!sessionId) {
+        sessionId = (window.crypto && window.crypto.randomUUID)
+          ? window.crypto.randomUUID()
+          : 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        sessionStorage.setItem(SESSION_KEY, sessionId);
+      }
+    }
+
+    /* ── safe DOM helpers (no innerHTML with user/API data) ───────── */
+    function el(tag, cls) {
+      var node = document.createElement(tag);
+      if (cls) node.className = cls;
+      return node;
+    }
+
+    function text(str) {
+      return document.createTextNode(String(str || ''));
+    }
+
+    /**
+     * Validate that a URL is safe to use as an href.
+     * Only http: and https: are allowed; anything else (javascript:, data:, etc.) returns null.
+     */
+    function safeHref(raw) {
+      if (!raw || typeof raw !== 'string') return null;
+      try {
+        var parsed = new URL(raw, window.location.href);
+        return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.href : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    /* ── append message ───────────────────────────────────────────── */
+    function addMessage(content, role, sources, isError) {
+      if (emptyNote) { emptyNote.remove(); emptyNote = null; }
+
+      var wrap   = el('div', 'cb-message ' + role);
+      var bubble = el('div', 'cb-bubble' + (isError ? ' error' : ''));
+      bubble.appendChild(text(content));
+      wrap.appendChild(bubble);
+
+      if (role === 'bot' && sources && sources.length) {
+        var srcRow  = el('div', 'cb-sources');
+        srcRow.appendChild(text('Sources: '));
+
+        var shown = sources.slice(0, MAX_SOURCES);
+        shown.forEach(function (src, i) {
+          var meta  = src.metadata || {};
+          var title = (meta.title || meta.name || ('Source ' + (i + 1))).substring(0, 80);
+          var href  = safeHref(meta.url);
+
+          if (href) {
+            var a = el('a');
+            a.href = href;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.appendChild(text(title));
+            srcRow.appendChild(a);
+          } else {
+            var span = el('span');
+            span.appendChild(text(title));
+            srcRow.appendChild(span);
+          }
+
+          if (i < shown.length - 1) {
+            srcRow.appendChild(text(', '));
+          }
         });
-    </script>
-</body>
-</html>
+
+        wrap.appendChild(srcRow);
+      }
+
+      messages.appendChild(wrap);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    /* ── send ─────────────────────────────────────────────────────── */
+    function send() {
+      var q = input.value.trim();
+      if (!q || sendBtn.disabled) return;
+
+      ensureSession();
+      addMessage(q, 'user');
+      input.value = '';
+      sendBtn.disabled = true;
+      sendBtn.innerHTML = '<span class="cb-spinner" aria-hidden="true"></span>';
+
+      fetch(CHAT_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q, session_id: sessionId })
+      })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          return { ok: res.ok, data: data };
+        });
+      })
+      .then(function (r) {
+        if (!r.ok) throw new Error(r.data.error || 'Server error ' + r.data.status);
+        if (r.data.session_id) {
+          sessionId = r.data.session_id;
+          sessionStorage.setItem(SESSION_KEY, sessionId);
+        }
+        addMessage(r.data.answer || '', 'bot', r.data.sources);
+      })
+      .catch(function (err) {
+        addMessage(err.message || 'An error occurred.', 'bot', null, true);
+      })
+      .finally(function () {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send';
+        input.focus();
+      });
+    }
+
+    sendBtn.addEventListener('click', send);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+
+  }());
+  </script>
+</div>
