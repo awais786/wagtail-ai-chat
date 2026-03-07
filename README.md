@@ -8,131 +8,126 @@ A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. Dr
 - **Per-field chunking**: each field (body, introduction, …) is chunked independently with section metadata, so the LLM always knows where a chunk came from
 - **Hybrid retrieval**: vector similarity search + optional Wagtail full-text search
 - **Multiple vector stores**: FAISS (default), ChromaDB, pgvector (PostgreSQL)
-- **Multiple embedding providers**: HuggingFace, Sentence Transformers, OpenAI, Ollama
+- **Multiple embedding providers**: HuggingFace, Sentence Transformers, OpenAI
 - **Multiple LLM providers**: Ollama (local), OpenAI, Anthropic
 - **Chat history**: server-side with LLM summarisation of older turns
 - **Unified CLI**: one management command covers indexing, chat, and pipeline smoke-testing
+- **CSRF protection**: API endpoint enforces Django CSRF on POST requests
 
 ## Installation
 
-### 1. Install the package
+### 1. Install the package with your chosen provider
 
 ```bash
-# From GitHub
-pip install git+https://github.com/awais786/wagtail-ai-chat.git
+# Local stack (recommended for development): FAISS + Sentence Transformers + Ollama
+pip install "wagtail-rag[local] @ git+https://github.com/awais786/wagtail-ai-chat.git"
 
-# Local checkout
-pip install -e .
+# OpenAI
+pip install "wagtail-rag[openai] @ git+https://github.com/awais786/wagtail-ai-chat.git"
+
+# All providers
+pip install "wagtail-rag[all] @ git+https://github.com/awais786/wagtail-ai-chat.git"
+
+# Local checkout (development)
+pip install -e ".[local]"
 ```
 
-### 2. Add to INSTALLED_APPS
-
-```python
-INSTALLED_APPS = [
-    # ...
-    "wagtail_rag",
-]
-```
-
-### 3. Install provider extras
-
-```bash
-# Local (recommended): Sentence Transformers embeddings + Ollama LLM + FAISS
-pip install "wagtail-rag[local]"
-
-# OpenAI for both embeddings and LLM
-pip install "wagtail-rag[openai]"
-
-# Anthropic LLM only
-pip install "wagtail-rag[anthropic]"
-
-# pgvector backend
-pip install "wagtail-rag[pgvector]"
-
-# Everything
-pip install "wagtail-rag[all]"
-```
+Available extras:
 
 | Extra | Installs |
 |---|---|
 | `faiss` | faiss-cpu |
 | `chroma` | chromadb |
 | `pgvector` | psycopg2-binary, sqlalchemy |
+| `sentence-transformers` | sentence-transformers |
 | `huggingface` | langchain-huggingface, sentence-transformers |
-| `sentence-transformers` | sentence-transformers only |
 | `openai` | langchain-openai |
 | `ollama` | ollama |
 | `anthropic` | langchain-anthropic |
 | `local` | faiss + sentence-transformers + ollama |
 | `all` | every provider |
 
-### 4. Add URL configuration (optional — for the API endpoint)
+### 2. Add to INSTALLED_APPS
+
+```python
+# settings.py
+INSTALLED_APPS = [
+    # ...
+    "wagtail_rag",
+]
+```
+
+> `wagtail_rag` has no database models — no migration needed.
+
+### 3. Configure settings
+
+Pick one setup block and add it to `settings.py`:
+
+```python
+# --- Option A: Local (Ollama + Sentence Transformers + FAISS) ---
+WAGTAIL_RAG_EMBEDDING_PROVIDER   = "sentence-transformers"
+WAGTAIL_RAG_EMBEDDING_MODEL      = "all-MiniLM-L6-v2"
+WAGTAIL_RAG_LLM_PROVIDER         = "ollama"
+WAGTAIL_RAG_MODEL_NAME           = "mistral"
+WAGTAIL_RAG_VECTOR_STORE_BACKEND = "faiss"
+WAGTAIL_RAG_CHROMA_PATH          = os.path.join(BASE_DIR, "faiss_index")
+
+# --- Option B: OpenAI ---
+WAGTAIL_RAG_EMBEDDING_PROVIDER   = "openai"
+WAGTAIL_RAG_EMBEDDING_MODEL      = "text-embedding-3-small"
+WAGTAIL_RAG_LLM_PROVIDER         = "openai"
+WAGTAIL_RAG_MODEL_NAME           = "gpt-4o"
+# Set OPENAI_API_KEY as an environment variable, not here
+```
+
+For Option A, make sure Ollama is running: `ollama serve` and `ollama pull mistral`.
+
+### 4. Add URL configuration (for the API endpoint and chatbox)
 
 ```python
 # urls.py
+from django.urls import include, path
+from wagtail import urls as wagtail_urls
+
 urlpatterns = [
-    path("", include("wagtail_rag.urls")),  # before wagtail_urls
+    path("", include("wagtail_rag.urls")),  # must come before wagtail_urls
     path("", include(wagtail_urls)),
 ]
 ```
 
-This exposes the chat API at `GET/POST /api/rag/chat/`.
+This exposes:
+- `GET/POST /api/rag/chat/` — chat API
+- `GET /chatbox/` — standalone widget page (for testing)
 
-### 5. Add the floating chatbox to your base template (optional)
-
-```django
-<div id="rag-chatbox-wrapper"
-     style="position: fixed; bottom: 1rem; right: 1rem; z-index: 9999;">
-    {% include "wagtail_rag/chatbox.html" %}
-</div>
-```
-
-## Quick Start
-
-### Configure settings
-
-```python
-# settings.py
-
-# --- Local setup (Ollama + Sentence Transformers + FAISS) ---
-WAGTAIL_RAG_EMBEDDING_PROVIDER = "sentence-transformers"
-WAGTAIL_RAG_EMBEDDING_MODEL    = "all-MiniLM-L6-v2"
-WAGTAIL_RAG_LLM_PROVIDER       = "ollama"
-WAGTAIL_RAG_MODEL_NAME         = "mistral"
-WAGTAIL_RAG_VECTOR_STORE_BACKEND = "faiss"
-WAGTAIL_RAG_CHROMA_PATH        = os.path.join(BASE_DIR, "faiss_index")
-
-# --- OpenAI setup ---
-WAGTAIL_RAG_EMBEDDING_PROVIDER = "openai"
-WAGTAIL_RAG_EMBEDDING_MODEL    = "text-embedding-3-small"
-WAGTAIL_RAG_LLM_PROVIDER       = "openai"
-WAGTAIL_RAG_MODEL_NAME         = "gpt-4o"
-OPENAI_API_KEY                 = "sk-..."
-
-# --- pgvector backend ---
-WAGTAIL_RAG_VECTOR_STORE_BACKEND = "pgvector"
-# Derived automatically from DATABASES['default'] if PostgreSQL,
-# or set explicitly:
-WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING = "postgresql+psycopg2://user:pass@localhost:5432/mydb"
-```
-
-### Build the index
+### 5. Build the index
 
 ```bash
 python manage.py rag index
 ```
 
-### Chat
+### 6. Verify with a test question
 
 ```bash
-python manage.py rag chat
+python manage.py rag chat -q "What content is on this site?"
 ```
 
-### Smoke-test the pipeline
+Or run the built-in smoke test:
 
 ```bash
 python manage.py rag test
 ```
+
+### 7. Add the chatbox widget to your base template (optional)
+
+```django
+<div style="position: fixed; bottom: 1rem; right: 1rem; z-index: 9999;">
+    {% include "wagtail_rag/chatbox.html" %}
+</div>
+```
+
+The widget reads the Django `csrftoken` cookie and sends it automatically on every request.
+
+---
 
 ## Management Command
 
@@ -146,6 +141,13 @@ python manage.py rag index --reset-only     # wipe collection only
 python manage.py rag index --page-id 42     # re-index one page
 ```
 
+If you change embedding models, always reset first:
+
+```bash
+python manage.py rag index --reset-only
+python manage.py rag index
+```
+
 ### `rag chat` — interactive or single-question chat
 
 ```bash
@@ -157,24 +159,18 @@ python manage.py rag chat --no-history             # stateless mode
 python manage.py rag chat --filter '{"model":"BreadPage"}'
 ```
 
-Interactive session commands:
-- `exit` / `quit` — stop
-- `clear` — start a new session
-- `sources on` / `sources off` — toggle source display
-- `Ctrl+C` — exit
+Interactive session commands: `exit`/`quit`, `clear` (new session), `sources on/off`, `Ctrl+C`.
 
 ### `rag test` — smoke-test the full pipeline
 
 ```bash
-python manage.py rag test                                    # built-in questions, full RAG
-python manage.py rag test --search-only                      # retrieval only (faster)
-python manage.py rag test --questions "Q1" "Q2" "Q3"         # custom questions
-python manage.py rag test --filter '{"model":"BlogPage"}'    # scoped to a model
+python manage.py rag test                                     # built-in questions, full RAG
+python manage.py rag test --search-only                       # retrieval only (faster)
+python manage.py rag test --questions "Q1" "Q2" "Q3"          # custom questions
+python manage.py rag test --filter '{"model":"BlogPage"}'     # scoped to a model
 ```
 
-Pass criteria:
-- **Full RAG**: non-empty answer **and** at least 1 source retrieved → PASS
-- **Search-only**: at least 1 source retrieved → PASS
+Pass criteria: non-empty answer **and** at least 1 source retrieved (full RAG), or at least 1 source (search-only).
 
 Override the default questions via settings:
 ```python
@@ -184,53 +180,61 @@ WAGTAIL_RAG_TEST_QUESTIONS = [
 ]
 ```
 
+---
+
 ## Makefile shortcuts
 
 ```bash
-make index           # python manage.py rag index
-make index-reset     # python manage.py rag index --reset-only
+make install-local   # pip install -e ".[local,test,dev]"
+make install-openai  # pip install -e ".[openai,test,dev]"
+make install-all     # pip install -e ".[all,test,dev]"
+
+make index           # rag index
+make index-reset     # rag index --reset-only
 make index-rebuild   # reset then index
-make chat            # python manage.py rag chat
-make test-rag        # python manage.py rag test
-make test-rag-search # python manage.py rag test --search-only
+make chat            # rag chat
+make test-rag        # rag test (full pipeline)
+make test-rag-search # rag test --search-only
 make test            # pytest unit tests
 make test-cov        # pytest with coverage
 make lint            # black + flake8
 make format          # black auto-format
-make clean           # remove __pycache__, *.egg-info, coverage files
+make clean           # remove cache and build files
 ```
+
+---
 
 ## Configuration Reference
 
 ### Core
 
 ```python
-WAGTAIL_RAG_VECTOR_STORE_BACKEND = "faiss"        # "faiss" | "chroma" | "pgvector"
+WAGTAIL_RAG_VECTOR_STORE_BACKEND = "faiss"       # "faiss" | "chroma" | "pgvector"
 WAGTAIL_RAG_COLLECTION_NAME      = "wagtail_rag"
 WAGTAIL_RAG_CHROMA_PATH          = os.path.join(BASE_DIR, "faiss_index")
 
-WAGTAIL_RAG_LLM_PROVIDER         = "ollama"       # "ollama" | "openai" | "anthropic"
+WAGTAIL_RAG_LLM_PROVIDER         = "ollama"      # "ollama" | "openai" | "anthropic"
 WAGTAIL_RAG_MODEL_NAME           = "mistral"
 
-WAGTAIL_RAG_EMBEDDING_PROVIDER   = "sentence-transformers"  # "sentence-transformers" | "huggingface" | "openai" | "ollama"
+WAGTAIL_RAG_EMBEDDING_PROVIDER   = "sentence-transformers"
 WAGTAIL_RAG_EMBEDDING_MODEL      = "all-MiniLM-L6-v2"
 ```
 
 ### pgvector
 
 ```python
-WAGTAIL_RAG_VECTOR_STORE_BACKEND           = "pgvector"
+WAGTAIL_RAG_VECTOR_STORE_BACKEND       = "pgvector"
 # Auto-derived from DATABASES['default'] when using PostgreSQL.
 # Set explicitly to override:
-WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING     = "postgresql+psycopg2://user:pass@host:5432/db"
+WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING = "postgresql+psycopg2://user:pass@host:5432/db"
 ```
 
 ### Retrieval
 
 ```python
-WAGTAIL_RAG_RETRIEVE_K               = 8      # documents returned per query
-WAGTAIL_RAG_USE_HYBRID_SEARCH        = True   # vector + Wagtail full-text
-WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION  = False  # MultiQueryRetriever
+WAGTAIL_RAG_RETRIEVE_K              = 8      # documents returned per query
+WAGTAIL_RAG_USE_HYBRID_SEARCH       = True   # vector + Wagtail full-text
+WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION = False  # MultiQueryRetriever query expansion
 ```
 
 ### Indexing
@@ -238,19 +242,19 @@ WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION  = False  # MultiQueryRetriever
 ```python
 WAGTAIL_RAG_MODELS = [
     "blog.BlogPage",
-    "breads.BreadPage:*",   # :* = use all content fields
+    "breads.BreadPage:*",   # :* = index all content fields on this model
 ]
 WAGTAIL_RAG_EXCLUDE_MODELS = ["wagtailcore.Page"]
-WAGTAIL_RAG_CHUNK_SIZE    = 1000
-WAGTAIL_RAG_CHUNK_OVERLAP = 200
-WAGTAIL_RAG_SKIP_IF_INDEXED = True   # skip unchanged pages
-WAGTAIL_RAG_PRUNE_DELETED   = True   # remove stale chunks
+WAGTAIL_RAG_CHUNK_SIZE      = 1000
+WAGTAIL_RAG_CHUNK_OVERLAP   = 200
+WAGTAIL_RAG_SKIP_IF_INDEXED = True  # skip unchanged pages on re-index
+WAGTAIL_RAG_PRUNE_DELETED   = True  # remove stale chunks for deleted pages
 ```
 
 ### API and security
 
 ```python
-WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE    = 1024 * 1024  # 1 MB
+WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE    = 1024 * 1024  # 1 MB POST body limit
 WAGTAIL_RAG_MAX_QUESTION_LENGTH      = 0            # 0 = no limit
 WAGTAIL_RAG_MAX_CONTEXT_CHARS        = 0            # 0 = no limit
 WAGTAIL_RAG_ENABLE_CHAT_HISTORY      = True
@@ -260,13 +264,14 @@ WAGTAIL_RAG_CHAT_HISTORY_RECENT_MESSAGES = 6
 ### Provider-specific model overrides
 
 ```python
-WAGTAIL_RAG_OPENAI_MODEL_NAME         = "gpt-4o"
-WAGTAIL_RAG_ANTHROPIC_MODEL_NAME      = "claude-3-5-sonnet-20241022"
-WAGTAIL_RAG_OLLAMA_MODEL_NAME         = "mistral"
+# Use these to avoid cross-provider model name conflicts
+WAGTAIL_RAG_OPENAI_MODEL_NAME            = "gpt-4o"
+WAGTAIL_RAG_ANTHROPIC_MODEL_NAME         = "claude-3-5-sonnet-20241022"
+WAGTAIL_RAG_OLLAMA_MODEL_NAME            = "mistral"
 
-WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL    = "text-embedding-3-small"
-WAGTAIL_RAG_OLLAMA_EMBEDDING_MODEL    = "nomic-embed-text"
-WAGTAIL_RAG_HUGGINGFACE_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL       = "text-embedding-3-small"
+WAGTAIL_RAG_OLLAMA_EMBEDDING_MODEL       = "nomic-embed-text"
+WAGTAIL_RAG_HUGGINGFACE_EMBEDDING_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"
 ```
 
 ### Custom prompt templates
@@ -287,9 +292,13 @@ Answer:"""
 WAGTAIL_RAG_SYSTEM_PROMPT = "You are a helpful assistant. Answer using only the provided context."
 ```
 
+---
+
 ## API Endpoints
 
 ### `GET /api/rag/chat/`
+
+No CSRF token required for GET. The response also sets the `csrftoken` cookie for subsequent POST requests.
 
 ```bash
 curl "http://localhost:8000/api/rag/chat/?q=What+types+of+bread+do+you+have?"
@@ -297,9 +306,18 @@ curl "http://localhost:8000/api/rag/chat/?q=What+types+of+bread+do+you+have?"
 
 ### `POST /api/rag/chat/`
 
+CSRF token required. Obtain it from the `csrftoken` cookie set by the GET above:
+
 ```bash
-curl -X POST http://localhost:8000/api/rag/chat/ \
+# Step 1: get the CSRF token
+CSRF=$(curl -sc /tmp/jar "http://localhost:8000/api/rag/chat/?q=ping" \
+       | python3 -c "import sys,json; print(json.load(sys.stdin).get('answer',''))" 2>/dev/null; \
+       grep csrftoken /tmp/jar | awk '{print $NF}')
+
+# Step 2: POST with the token
+curl -b /tmp/jar -X POST http://localhost:8000/api/rag/chat/ \
   -H "Content-Type: application/json" \
+  -H "X-CSRFToken: $CSRF" \
   -d '{"question": "What types of bread do you have?", "session_id": "abc123"}'
 ```
 
@@ -312,11 +330,14 @@ Response `200`:
       "content": "...",
       "metadata": {"title": "Multigrain Bread", "url": "/breads/multigrain/", "model": "BreadPage", "section": "body"}
     }
-  ]
+  ],
+  "session_id": "abc123"
 }
 ```
 
-Error codes: `400` bad request · `413` body too large · `500` server error.
+Error codes: `400` bad request · `403` missing/invalid CSRF token · `413` body too large · `500` server error.
+
+---
 
 ## Python API
 
@@ -338,11 +359,15 @@ result = chatbot.query("sourdough", search_only=True)
 chatbot = get_chatbot(llm_provider="openai", model_name="gpt-4o")
 ```
 
+---
+
 ## How It Works
 
 1. **Indexing** (`rag index`): discovers live Wagtail pages → extracts each field independently → chunks with paragraph preservation → prepends `Page: / Section:` header to every chunk → upserts into vector store with deterministic IDs (`{page_id}_{field}_{chunk_index}`). Stale chunks are removed before re-indexing.
 
 2. **Querying** (`rag chat` / API): embeds the question → vector similarity search → optional Wagtail full-text search → deduplicate & title-boost → pass top-k chunks as context to LLM → return answer + sources.
+
+---
 
 ## Testing
 
@@ -354,44 +379,50 @@ pytest wagtail_rag/tests/ -v
 pytest wagtail_rag/tests/ --cov=wagtail_rag --cov-report=term-missing
 
 # Individual modules
-pytest wagtail_rag/tests/test_rag_command.py   # unified rag command
-pytest wagtail_rag/tests/test_providers.py     # embedding & LLM factories
-pytest wagtail_rag/tests/test_extraction.py    # chunking & field extraction
-pytest wagtail_rag/tests/test_index_builder.py # pgvector, batch upsert helpers
-pytest wagtail_rag/tests/test_generation.py    # LLM generation
-pytest wagtail_rag/tests/test_api_views.py     # REST API
-pytest wagtail_rag/tests/test_search.py        # hybrid search
+pytest wagtail_rag/tests/test_rag_command.py    # unified rag command
+pytest wagtail_rag/tests/test_providers.py      # embedding & LLM factories
+pytest wagtail_rag/tests/test_extraction.py     # chunking & field extraction
+pytest wagtail_rag/tests/test_index_builder.py  # pgvector, batch upsert helpers
+pytest wagtail_rag/tests/test_generation.py     # LLM generation
+pytest wagtail_rag/tests/test_api_views.py      # REST API + CSRF
+pytest wagtail_rag/tests/test_search.py         # hybrid search
 ```
 
 CI runs on Python 3.11 and 3.12 against Django 4.2 and 5.2.
 
+---
+
 ## Troubleshooting
 
-**"Collection expecting embedding with dimension of X, got Y"** — you changed embedding model without resetting the index.
+**"Collection expecting embedding with dimension of X, got Y"** — changed embedding model without resetting the index.
 ```bash
 make index-rebuild
 ```
 
 **"The model X does not exist"** — model name doesn't match the provider. Use provider-specific settings:
 ```python
-WAGTAIL_RAG_OPENAI_MODEL_NAME  = "gpt-4o"
-WAGTAIL_RAG_OLLAMA_MODEL_NAME  = "mistral"
+WAGTAIL_RAG_OPENAI_MODEL_NAME = "gpt-4o"
+WAGTAIL_RAG_OLLAMA_MODEL_NAME = "mistral"
 ```
 
-**"No pages found to index"** — check pages are published and `WAGTAIL_RAG_MODELS` names are correct.
+**"No pages found to index"** — check pages are published and `WAGTAIL_RAG_MODELS` names are correct (format: `"app.ModelName"`).
 
-**"Connection refused" (Ollama)** — run `ollama serve` first.
+**"Connection refused" (Ollama)** — run `ollama serve` first, then `ollama pull mistral`.
 
-**Import errors** — install the relevant extra: `pip install "wagtail-rag[local]"`.
+**403 on POST** — CSRF token missing. Read the `csrftoken` cookie from a GET response and send it as `X-CSRFToken` header.
+
+**Import errors** — install the required extra: `pip install "wagtail-rag[local]"`.
+
+---
 
 ## Requirements
 
 - Python 3.9+
 - Django 4.2+
-- Wagtail 5.0+
+- Wagtail 6.0+
 - LangChain (installed automatically)
-- At least one provider extra
+- At least one provider extra (see Installation)
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
