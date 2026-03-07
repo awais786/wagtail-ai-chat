@@ -24,13 +24,12 @@ from .index_builder import get_page_models, get_live_pages, ChromaStore
 
 __all__ = [
     # Primary extractor
-    'page_to_documents_api_extractor',
-    'WagtailAPIExtractor',
+    "page_to_documents_api_extractor",
+    "WagtailAPIExtractor",
     # Index building
-    'build_rag_index',
+    "build_rag_index",
     # Index builder components
-    'get_page_models',
-    'get_live_pages',
-    'ChromaStore',  # Works with both ChromaDB and FAISS
+    "get_page_models",
+    "get_live_pages",
+    "ChromaStore",  # Works with both ChromaDB and FAISS
 ]
-

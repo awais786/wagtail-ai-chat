@@ -1,0 +1,86 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop, fixing-chat ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+        django-version: ['4.2', '5.2']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: pip
+        cache-dependency-path: setup.py
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install "Django==${{ matrix.django-version }}.*"
+        pip install wagtail
+        pip install -e ".[test,local]"
+
+    - name: Run tests
+      env:
+        DJANGO_SETTINGS_MODULE: wagtail_rag.tests.settings
+      run: |
+        pytest wagtail_rag/tests/ \
+          --cov=wagtail_rag \
+          --cov-report=xml \
+          --cov-report=term-missing \
+          -v
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: pip
+        cache-dependency-path: setup.py
+
+    - name: Install lint tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install black flake8
+
+    - name: Check formatting (black)
+      run: black --check wagtail_rag
+
+    - name: Lint (flake8 — errors only)
+      run: |
+        flake8 wagtail_rag \
+          --count \
+          --select=E9,F63,F7,F82 \
+          --show-source \
+          --statistics
+
+    - name: Lint (flake8 — style warnings)
+      run: |
+        flake8 wagtail_rag \
+          --count \
+          --exit-zero \
+          --max-complexity=10 \
+          --max-line-length=127 \
+          --statistics
