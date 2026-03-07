@@ -1,8 +1,8 @@
 """
 LLM Generation Module for RAG Chatbot.
 
-This module handles all LLM (Large Language Model) generation functionality,
-including prompt construction, chain execution, and answer generation.
+This module handles LLM (Large Language Model) generation functionality,
+including prompt construction and answer generation with proper context handling.
 """
 
 from __future__ import annotations
@@ -16,51 +16,26 @@ from wagtail_rag.chat_history import get_history_store
 
 logger = logging.getLogger(__name__)
 
-# Detect LangChain edition / available components
+# Import LangChain components with simplified detection
 try:
-    # LCEL-style (newer langchain-core) primitives
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-    from langchain_core.runnables import RunnablePassthrough
+    from langchain_core.runnables import RunnablePassthrough, RunnableWithMessageHistory
     from langchain_core.output_parsers import StrOutputParser
-
-    try:
-        from langchain_core.runnables import RunnableWithMessageHistory
-    except Exception:
-        from langchain_core.runnables.history import RunnableWithMessageHistory
+    from langchain_core.messages import HumanMessage
+    from langchain_core.language_models.chat_models import BaseChatModel
     LCEL_AVAILABLE = True
-except Exception:
-    ChatPromptTemplate = None
-    MessagesPlaceholder = None
-    RunnablePassthrough = None
-    StrOutputParser = None
-    RunnableWithMessageHistory = None
+except ImportError:
+    # Set to None for graceful degradation
+    ChatPromptTemplate = MessagesPlaceholder = RunnablePassthrough = None
+    RunnableWithMessageHistory = StrOutputParser = HumanMessage = BaseChatModel = None
     LCEL_AVAILABLE = False
 
 try:
-    from langchain_core.messages import HumanMessage
-
-    HUMAN_MESSAGE_AVAILABLE = True
-except Exception:
-    HumanMessage = None
-    HUMAN_MESSAGE_AVAILABLE = False
-
-try:
-    from langchain_core.language_models.chat_models import BaseChatModel
-
-    BASE_CHAT_MODEL_AVAILABLE = True
-except Exception:
-    BaseChatModel = None
-    BASE_CHAT_MODEL_AVAILABLE = False
-
-try:
-    # Legacy LangChain interfaces
     from langchain.prompts import PromptTemplate
     from langchain.chains import RetrievalQA
-
     LEGACY_AVAILABLE = True
-except Exception:
-    PromptTemplate = None
-    RetrievalQA = None
+except ImportError:
+    PromptTemplate = RetrievalQA = None
     LEGACY_AVAILABLE = False
 
 
@@ -100,20 +75,20 @@ class LLMGenerator:
         self.history_chain = self._create_history_chain()
 
     def _get_prompt_template(self) -> str:
-        """Return prompt template from settings or default."""
+        """Return prompt template optimized for structured content."""
         return getattr(
             settings,
             "WAGTAIL_RAG_PROMPT_TEMPLATE",
-            """You are a knowledgeable assistant helping users find information from a Wagtail CMS website. Your goal is to provide accurate, helpful answers based strictly on the provided context.
+            """You are an expert assistant helping users find information from website content. Analyze the provided context carefully and provide accurate, helpful answers.
 
-**Instructions:**
-1. Answer ONLY using information explicitly stated in the context below
-2. If the context contains the answer, provide a clear, well-structured response
-3. Cite the source page when providing information (e.g., "According to [Page Title]...")
-4. If the context does NOT contain enough information to answer the question, respond with: "I don't have enough information in the available content to answer that question."
-5. Be concise but complete - prioritize clarity over brevity
-6. If the question has multiple parts, address each part separately
-7. Do not make assumptions or add information not present in the context
+**Guidelines:**
+1. Use ONLY information from the context provided below
+2. When citing information, reference the source page title or section
+3. For structured content (like FAQ sections, numbered lists, or procedures), maintain the original organization
+4. If content has sections or categories, organize your response accordingly
+5. If you cannot find relevant information in the context, clearly state: "I don't have enough information in the available content to answer that question."
+6. For multi-part questions, address each part systematically
+7. Preserve important formatting like bullet points, numbers, or hierarchical structure when relevant
 
 **Context:**
 {context}
@@ -125,11 +100,11 @@ class LLMGenerator:
         )
 
     def _get_system_prompt(self) -> str:
-        """System prompt used for chat-history runs."""
+        """System prompt optimized for structured content handling."""
         return getattr(
             settings,
             "WAGTAIL_RAG_SYSTEM_PROMPT",
-            """You are a knowledgeable assistant for a Wagtail CMS website. Answer questions using ONLY the provided context. Always cite sources when available. If you cannot answer based on the context, clearly state "I don't have enough information to answer that question." Be accurate, concise, and helpful.""",
+            """You are a knowledgeable assistant for a website. Answer questions using ONLY the provided context. Maintain the structure and organization of the source content when relevant. Always cite sources and clearly state if information is not available.""",
         )
 
     def _create_qa_chain(self) -> Optional[Any]:
@@ -234,24 +209,9 @@ class LLMGenerator:
             context = context[: max_context_chars - 3] + "..."
         return context
 
-    def _format_simple_prompt(
-        self,
-        question: str,
-        docs: List[Any],
-    ) -> str:
-        """Format a plain-text prompt using retrieved documents (fallback path)."""
-        context = self._get_context_from_docs(docs)
-        return self.prompt_template_str.format(
-            context=context,
-            question=question,
-        )
-
     def _is_chat_model(self) -> bool:
-        if (
-            BASE_CHAT_MODEL_AVAILABLE
-            and BaseChatModel
-            and isinstance(self.llm, BaseChatModel)
-        ):
+        """Detect if the LLM is a chat model based on class name and available methods."""
+        if LCEL_AVAILABLE and BaseChatModel and isinstance(self.llm, BaseChatModel):
             return True
         return (
             hasattr(self.llm, "__class__") and "Chat" in self.llm.__class__.__name__
@@ -291,7 +251,7 @@ class LLMGenerator:
     def _invoke_chat_model(self, prompt_text: str) -> str:
         """Invoke a chat model (ChatOllama, ChatOpenAI, etc.) with messages."""
         # Try with HumanMessage wrapper first
-        if HUMAN_MESSAGE_AVAILABLE and HumanMessage:
+        if LCEL_AVAILABLE and HumanMessage:
             try:
                 message = HumanMessage(content=prompt_text)
                 result = self.llm.invoke([message])

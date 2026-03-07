@@ -5,6 +5,7 @@ Uses Wagtail's built-in methods to extract content, avoiding manual field type h
 """
 
 import logging
+import re
 from typing import Dict, List, Optional, Tuple
 
 from django.conf import settings
@@ -221,14 +222,40 @@ class WagtailAPIExtractor:
 
     @staticmethod
     def _clean_text(text) -> str:
-        """Clean text by stripping HTML and normalizing whitespace."""
+        """Clean inline text (single block value) by stripping HTML and normalizing whitespace.
+
+        Intentionally collapses whitespace — appropriate for individual block values
+        where paragraph structure within a single block is not meaningful.
+        Use _clean_field_text() when processing a whole field that may contain paragraphs.
+        """
         if not text:
             return ""
-        # Strip HTML tags
         text = strip_tags(str(text))
-        # Normalize whitespace
         text = " ".join(text.split())
         return text.strip()
+
+    @staticmethod
+    def _clean_field_text(text) -> str:
+        """Clean a whole field's text while preserving paragraph structure.
+
+        Unlike _clean_text, this keeps paragraph breaks so that
+        RecursiveCharacterTextSplitter can split on them. Used when processing
+        RichTextField.source or any pre-assembled multi-paragraph content.
+        """
+        if not text:
+            return ""
+        # Convert common HTML block elements to paragraph breaks before stripping tags,
+        # so that <p>, <br>, <li> etc. produce readable line breaks rather than
+        # running all sentences together.
+        text = re.sub(r"<br\s*/?>", "\n", str(text), flags=re.IGNORECASE)
+        text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
+        text = re.sub(r"</li>", "\n", text, flags=re.IGNORECASE)
+        text = re.sub(r"</h[1-6]>", "\n\n", text, flags=re.IGNORECASE)
+        text = strip_tags(text)
+        # Normalize whitespace within each paragraph, but preserve paragraph breaks.
+        paragraphs = re.split(r"\n{2,}", text)
+        cleaned = [" ".join(p.split()) for p in paragraphs if p.strip()]
+        return "\n\n".join(cleaned)
 
     def _extract_from_dict(self, data: dict) -> str:
         """Extract text from dictionary structures."""
@@ -321,13 +348,14 @@ class WagtailAPIExtractor:
 
                 return "\n\n".join(parts) if parts else None
 
-            # For RichTextField: has .source property
+            # For RichTextField: has .source property (HTML).
+            # Use _clean_field_text to preserve paragraph breaks.
             if hasattr(value, "source"):
-                return self._clean_text(value.source)
+                return self._clean_field_text(value.source)
 
-            # For simple text fields
+            # For simple text fields — preserve paragraph breaks.
             if isinstance(value, str):
-                return self._clean_text(value)
+                return self._clean_field_text(value)
 
             # For other types, convert to string
             text = str(value)
@@ -337,12 +365,21 @@ class WagtailAPIExtractor:
             logger.error(f"Error extracting field '{field_name}': {e}")
             return None
 
-    def extract_page(self, page) -> List[Document]:
-        """
-        Extract content from a Wagtail page using API-style field access.
+    def _make_chunk_header(self, title: str, field_name: str) -> str:
+        """Return the context header prepended to every chunk.
 
-        This is simpler than manual parsing because we let Wagtail handle
-        the complexity of different field types.
+        Embedding the page title and section name directly in the chunk text
+        (not just in metadata) means the LLM always has source context even
+        when metadata is not passed through to the prompt.
+        """
+        return f"Page: {title}\nSection: {field_name}\n\n"
+
+    def extract_page(self, page) -> List[Document]:
+        """Extract content from a Wagtail page using API-style field access.
+
+        Each content field is chunked independently so that chunks never
+        span multiple fields, section metadata is accurate, and each chunk
+        carries a title+section header for LLM context.
         """
         # Debug: Show all available content fields on this page
         available_fields = self._get_available_content_fields(page)
@@ -353,81 +390,73 @@ class WagtailAPIExtractor:
 
         api_fields, field_source = self._resolve_candidate_fields(page)
 
-        # Base metadata
-        metadata = self._build_metadata(page)
+        # Base metadata shared across all documents from this page
+        base_metadata = self._build_metadata(page)
+        base_metadata["field_source"] = field_source
 
-        # Extract all fields
-        sections = {}
-        sections["title"] = str(page.title)
-        extracted_fields = ["title"]
+        title = str(page.title)
+        documents: List[Document] = []
+        extracted_fields: List[str] = []
 
         for field_name in api_fields:
             text = self._extract_field_value(page, field_name)
-            if text and len(text.strip()) > MIN_FIELD_LENGTH:
-                sections[field_name] = text
-                extracted_fields.append(field_name)
+            if not text or len(text.strip()) <= MIN_FIELD_LENGTH:
+                continue
 
-        # Combine all sections
-        full_content = "\n\n".join(sections.values())
-        content_length = len(full_content)
+            extracted_fields.append(field_name)
+            header = self._make_chunk_header(title, field_name)
 
-        # Log extraction details
+            if len(text) + len(header) <= self.size_threshold:
+                # Field fits in a single document — no splitting needed.
+                documents.append(
+                    Document(
+                        page_content=f"{header}{text}",
+                        metadata={
+                            **base_metadata,
+                            "section": field_name,
+                            "chunk_index": 0,
+                            "total_chunks": 1,
+                            "content_length": len(text),
+                        },
+                    )
+                )
+            else:
+                # Field is large — split into chunks, each with the same header.
+                chunks = self.text_splitter.split_text(text)
+                logger.debug(
+                    f"Page '{title}' field '{field_name}': split into {len(chunks)} chunks"
+                )
+                for i, chunk in enumerate(chunks):
+                    documents.append(
+                        Document(
+                            page_content=f"{header}{chunk}",
+                            metadata={
+                                **base_metadata,
+                                "section": field_name,
+                                "chunk_index": i,
+                                "total_chunks": len(chunks),
+                                "content_length": len(chunk),
+                            },
+                        )
+                    )
+
+        # Log extraction summary
         logger.debug(
-            f"Page '{page.title}' (ID: {page.id}): extracted {len(extracted_fields)} fields "
-            f"({', '.join(extracted_fields)}), {content_length} chars total"
+            f"Page '{title}' (ID: {page.id}): extracted {len(extracted_fields)} field(s) "
+            f"({', '.join(extracted_fields) or 'none'}), produced {len(documents)} document(s)"
         )
 
-        # If no meaningful content extracted (only title), return empty list to trigger fallback
-        if len(extracted_fields) == 1 and extracted_fields[0] == "title":
+        if not documents:
             logger.warning(
                 f"No content fields found for {page.__class__.__name__} (ID: {page.id}). "
                 "Returning empty list to trigger fallback extractor."
             )
             return []
 
-        # Small page: single document
-        if content_length <= self.size_threshold:
-            return [
-                Document(
-                    page_content=full_content,
-                    metadata={
-                        **metadata,
-                        "section": "full",
-                        "chunk_index": 0,
-                        "total_chunks": 1,
-                        "content_length": content_length,
-                        "doc_id": f"{page.id}_full_0",
-                        "field_source": field_source,
-                        "extracted_fields": ", ".join(
-                            extracted_fields
-                        ),  # Include title now
-                    },
-                )
-            ]
-
-        # Large page: chunk it
-        chunks = self.text_splitter.split_text(full_content)
-        logger.debug(f"Created {len(chunks)} chunks for page {page.id}")
-
-        documents = []
-        for i, chunk in enumerate(chunks):
-            documents.append(
-                Document(
-                    page_content=chunk,
-                    metadata={
-                        **metadata,
-                        "section": "full",
-                        "chunk_index": i,
-                        "total_chunks": len(chunks),
-                        "content_length": len(chunk),
-                        "doc_id": f"{page.id}_chunk_{i}",
-                        "field_source": field_source,
-                        "extracted_fields": ", ".join(
-                            extracted_fields
-                        ),  # Include title now
-                    },
-                )
-            )
+        # Stamp extracted_fields on every document now that we know the full list.
+        extracted_fields_str = ", ".join(["title"] + extracted_fields)
+        for doc in documents:
+            doc.metadata["extracted_fields"] = extracted_fields_str
 
         return documents
 

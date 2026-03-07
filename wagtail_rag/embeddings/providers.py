@@ -20,8 +20,8 @@ PROVIDER_DEFAULTS: Dict[str, str] = {
     "hf": "sentence-transformers/all-MiniLM-L6-v2",
     "openai": "text-embedding-3-small",
     "ollama": "nomic-embed-text",
-    "sentence_transformers": "sentence-transformers/all-MiniLM-L6-v2",
-    "sentence-transformers": "sentence-transformers/all-MiniLM-L6-v2",  # Same as above (hyphen variant)
+    "sentence_transformers": "all-MiniLM-L6-v2",
+    "sentence-transformers": "all-MiniLM-L6-v2",
 }
 
 
@@ -142,6 +142,53 @@ class OllamaProvider(BaseEmbeddingProvider):
         return OllamaEmbeddings(model=model_name, **kwargs)
 
 
+class SentenceTransformerProvider(BaseEmbeddingProvider):
+    """Provider for sentence-transformers models loaded directly via langchain_community.
+
+    Distinct from HuggingFaceProvider: uses SentenceTransformerEmbeddings
+    (langchain_community) which loads models via the sentence-transformers
+    library without requiring the full HuggingFace hub stack.  Falls back to
+    HuggingFaceEmbeddings if SentenceTransformerEmbeddings is unavailable.
+    """
+
+    def create(self, model_name: Optional[str], **kwargs) -> Any:
+        if not model_name:
+            raise ValueError("model_name is required for sentence-transformers embeddings")
+
+        # Prefer the dedicated SentenceTransformerEmbeddings class.
+        for module_path, class_name in [
+            ("langchain_community.embeddings", "SentenceTransformerEmbeddings"),
+        ]:
+            try:
+                module = __import__(module_path, fromlist=[class_name])
+                cls = getattr(module, class_name)
+                return cls(model_name=model_name, **kwargs)
+            except (ImportError, AttributeError):
+                pass
+
+        # Fallback: HuggingFaceEmbeddings also wraps sentence-transformers.
+        for module_path, class_name in [
+            ("langchain_huggingface", "HuggingFaceEmbeddings"),
+            ("langchain_community.embeddings", "HuggingFaceEmbeddings"),
+        ]:
+            try:
+                module = __import__(module_path, fromlist=[class_name])
+                cls = getattr(module, class_name)
+                logger.debug(
+                    "SentenceTransformerEmbeddings unavailable; falling back to %s.%s",
+                    module_path,
+                    class_name,
+                )
+                return cls(model_name=model_name, **kwargs)
+            except (ImportError, AttributeError):
+                pass
+
+        raise ImportError(
+            "sentence-transformers embeddings are not installed. "
+            "Install: pip install sentence-transformers langchain-community"
+        )
+
+
 # --- Factory using provider classes -----------------------------------
 class EmbeddingProviderFactory:
     """Create embedding instances for supported providers.
@@ -152,8 +199,8 @@ class EmbeddingProviderFactory:
     PROVIDER_MAP: Dict[str, Type[BaseEmbeddingProvider]] = {
         "huggingface": HuggingFaceProvider,
         "hf": HuggingFaceProvider,
-        "sentence_transformers": HuggingFaceProvider,
-        "sentence-transformers": HuggingFaceProvider,
+        "sentence_transformers": SentenceTransformerProvider,
+        "sentence-transformers": SentenceTransformerProvider,
         "openai": OpenAIProvider,
         "ollama": OllamaProvider,
     }
@@ -166,20 +213,17 @@ class EmbeddingProviderFactory:
         if not model_name:
             return False
         provider = provider.lower()
-        hf_aliases = {
-            "huggingface",
-            "hf",
-            "sentence-transformers",
-            "sentence_transformers",
-        }
 
         if provider == "openai":
             return model_name.startswith("text-embedding-")
-        if provider in hf_aliases:
-            # HF models are usually repo-style names like org/model.
+        if provider in {"huggingface", "hf"}:
+            # HuggingFace Hub models are repo-style names like org/model-name.
             return "/" in model_name and not model_name.startswith("text-embedding-")
+        if provider in {"sentence-transformers", "sentence_transformers"}:
+            # Accept both short names (all-MiniLM-L6-v2) and repo-style names.
+            return not model_name.startswith("text-embedding-") and not model_name.startswith("gpt-")
         if provider == "ollama":
-            # Ollama model names are typically short local tags, not HF repo paths or OpenAI names.
+            # Ollama model names are short local tags, not HF paths or OpenAI names.
             return ("/" not in model_name) and (
                 not model_name.startswith("text-embedding-")
             )
@@ -280,15 +324,22 @@ class EmbeddingProviderFactory:
         return strategy.create(resolved_model_name, **dict(kwargs))
 
 
-# Convenience module-level helper
-_factory = EmbeddingProviderFactory()
-
-
 def get_embeddings(
     provider: Optional[str] = None, model_name: Optional[str] = None, **kwargs
 ) -> Any:
-    """Thin wrapper around EmbeddingProviderFactory.get for backward compatibility."""
-    return _factory.get(provider=provider, model_name=model_name, **kwargs)
+    """Create and return an embedding instance for the given provider.
+
+    Creates a fresh EmbeddingProviderFactory on each call so that Django
+    settings are always read at call time rather than at import time.
+    This is important for tests that override settings and for apps that
+    configure settings after the module is first imported.
+    """
+    return EmbeddingProviderFactory().get(provider=provider, model_name=model_name, **kwargs)
 
 
-__all__ = ["EmbeddingProviderFactory", "get_embeddings", "BaseEmbeddingProvider"]
+__all__ = [
+    "EmbeddingProviderFactory",
+    "get_embeddings",
+    "BaseEmbeddingProvider",
+    "SentenceTransformerProvider",
+]

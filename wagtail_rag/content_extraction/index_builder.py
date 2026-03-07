@@ -3,7 +3,7 @@ RAG index building and management.
 
 This module provides the main entry point for building the RAG index,
 orchestrating page selection, document extraction, and vector store operations.
-It handles both ChromaDB and FAISS backends for storing embeddings.
+It handles ChromaDB, FAISS, and pgvector backends for storing embeddings.
 """
 
 import logging
@@ -44,6 +44,7 @@ except ImportError:
 # Type alias for an optional output function (e.g. management command stdout.write)
 WriteFn = Optional[Callable[[str], None]]
 STEP_SEPARATOR = "=" * 80
+DEFAULT_EMBEDDING_BATCH_SIZE = 100
 
 
 def _write(out: WriteFn, message: str) -> None:
@@ -107,6 +108,40 @@ def _prune_deleted_documents_for_model(
     deleted = store.delete_pages_not_in(live_ids, source=model_name)
     if deleted:
         _write(stdout, f"  Pruned {deleted} stale document(s)")
+
+
+def _upsert_in_batches(
+    store: "ChromaStore",
+    documents: List,
+    batch_size: int,
+    stdout: WriteFn,
+) -> None:
+    """Upsert *documents* into *store* in slices of *batch_size*.
+
+    Batching across pages means the embedding model (local or API) receives a
+    larger input list per call, which:
+    - Reduces HTTP round-trips for API providers (OpenAI, etc.)
+    - Improves GPU/CPU utilisation for local models (HuggingFace, Ollama)
+
+    FAISS is saved once after all batches are written, not after every slice.
+    """
+    if not documents:
+        return
+
+    total = len(documents)
+    batches = range(0, total, batch_size)
+    for i in batches:
+        batch = documents[i : i + batch_size]
+        _write(
+            stdout,
+            f"  Embedding batch {i // batch_size + 1}/{len(batches)}: "
+            f"{len(batch)} document(s) ...",
+        )
+        store.upsert(batch, save=False)
+
+    # Single save at the end — avoids writing the FAISS index file N times.
+    store.save()
+    _write(stdout, f"  Saved {total} document(s) to vector store")
 
 
 # ============================================================================
@@ -206,8 +241,41 @@ def get_content_field_names(model: type) -> List[str]:
 
 
 # ============================================================================
-# Vector Store Wrapper (ChromaDB or FAISS)
+# Vector Store Wrapper (ChromaDB, FAISS, or pgvector)
 # ============================================================================
+
+
+def _pgvector_connection_string() -> str:
+    """Return a SQLAlchemy connection string for pgvector.
+
+    Checks ``WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING`` first.  If not set,
+    derives one from ``settings.DATABASES['default']``, which must be a
+    PostgreSQL database (ENGINE contains 'postgresql' or 'postgis').
+
+    Raises ``ValueError`` if no valid PostgreSQL configuration can be found.
+    """
+    explicit = getattr(settings, "WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING", None)
+    if explicit:
+        return explicit
+
+    db = settings.DATABASES.get("default", {})
+    engine = db.get("ENGINE", "")
+    if "postgresql" not in engine and "postgis" not in engine:
+        raise ValueError(
+            "WAGTAIL_RAG_VECTOR_STORE_BACKEND='pgvector' requires a PostgreSQL database. "
+            "Set WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING explicitly, or configure "
+            "DATABASES['default'] to use a PostgreSQL ENGINE."
+        )
+
+    host = db.get("HOST") or "localhost"
+    port = db.get("PORT") or 5432
+    name = db.get("NAME", "")
+    user = db.get("USER", "")
+    password = db.get("PASSWORD", "")
+
+    if password:
+        return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}"
+    return f"postgresql+psycopg2://{user}@{host}:{port}/{name}"
 
 
 class ChromaStore:
@@ -226,14 +294,14 @@ class ChromaStore:
     def __init__(
         self, *, path: str, collection: str, embeddings, backend: Optional[str] = None
     ):
-        """
-        Initialize vector store (ChromaDB or FAISS).
+        """Initialize vector store (ChromaDB, FAISS, or pgvector).
 
         Args:
-            path: Directory path for persistence
-            collection: Collection/index name
-            embeddings: Embedding function/model
-            backend: "chroma" or "faiss" (default: from settings)
+            path: Directory path for persistence (unused for pgvector).
+            collection: Collection/index name.
+            embeddings: LangChain embedding function/model.
+            backend: ``"chroma"``, ``"faiss"``, or ``"pgvector"``
+                     (default: from ``WAGTAIL_RAG_VECTOR_STORE_BACKEND``).
         """
         if backend is None:
             backend = getattr(
@@ -244,9 +312,8 @@ class ChromaStore:
         self.path = path
         self.collection = collection
 
-        os.makedirs(path, exist_ok=True)
-
         if backend == "chroma":
+            os.makedirs(path, exist_ok=True)
             try:
                 from langchain_community.vectorstores import Chroma
             except ImportError:
@@ -258,7 +325,9 @@ class ChromaStore:
                 collection_name=collection,
                 embedding_function=embeddings,
             )
+
         elif backend == "faiss":
+            os.makedirs(path, exist_ok=True)
             try:
                 from langchain_community.vectorstores import FAISS
                 import faiss
@@ -291,8 +360,54 @@ class ChromaStore:
                 docstore=InMemoryDocstore(),
                 index_to_docstore_id={},
             )
+
+        elif backend == "pgvector":
+            try:
+                from langchain_community.vectorstores import PGVector
+                from sqlalchemy import create_engine
+            except ImportError:
+                raise ImportError(
+                    "pgvector backend requires psycopg2 and sqlalchemy. "
+                    "Install with: pip install 'wagtail-rag[pgvector]'"
+                )
+
+            conn_string = _pgvector_connection_string()
+            self._pg_engine = create_engine(conn_string)
+            self.db = PGVector(
+                connection_string=conn_string,
+                collection_name=collection,
+                embedding_function=embeddings,
+                pre_delete_collection=False,
+            )
+
         else:
-            raise ValueError(f"Unknown backend: {backend}. Use 'chroma' or 'faiss'")
+            raise ValueError(
+                f"Unknown backend: {backend!r}. Use 'chroma', 'faiss', or 'pgvector'."
+            )
+
+    def _pg_collection_id(self) -> Optional[str]:
+        """Return the UUID of the PGVector collection scoped to this store.
+
+        All raw SQL operations against ``langchain_pg_embedding`` must be
+        scoped by this UUID so they only touch documents from this collection.
+        Returns ``None`` and logs a warning when the collection row is missing.
+        """
+        try:
+            from sqlalchemy import text as sa_text
+
+            with self._pg_engine.connect() as conn:
+                row = conn.execute(
+                    sa_text(
+                        "SELECT uuid FROM langchain_pg_collection WHERE name = :name"
+                    ),
+                    {"name": self.collection},
+                ).fetchone()
+                return str(row[0]) if row else None
+        except Exception:
+            logger.warning(
+                "Could not retrieve pgvector collection ID for %r", self.collection
+            )
+            return None
 
     def reset(self):
         """Delete the entire collection/index."""
@@ -316,6 +431,12 @@ class ChromaStore:
             self.db.index = faiss.IndexFlatL2(dimension)
             self.db.docstore = InMemoryDocstore()
             self.db.index_to_docstore_id = {}
+        elif self.backend == "pgvector":
+            try:
+                self.db.delete_collection()
+                self.db.create_collection()
+            except Exception as e:
+                logger.warning("Error resetting pgvector collection: %s", e)
 
     def delete_page(self, page_id: int):
         """Delete all chunks for a specific page."""
@@ -356,10 +477,25 @@ class ChromaStore:
                 if ids_to_delete:
                     self.db.delete(ids=ids_to_delete)
                     self.db.save_local(self.path, index_name=self.collection)
-        except Exception as e:
-            import logging
 
-            logging.getLogger(__name__).warning(f"Error deleting page {page_id}: {e}")
+            elif self.backend == "pgvector":
+                cid = self._pg_collection_id()
+                if not cid:
+                    return
+                from sqlalchemy import text as sa_text
+
+                with self._pg_engine.begin() as conn:
+                    conn.execute(
+                        sa_text(
+                            "DELETE FROM langchain_pg_embedding "
+                            "WHERE collection_id = :cid "
+                            "AND cmetadata->>'page_id' = :pid"
+                        ),
+                        {"cid": cid, "pid": str(page_id)},
+                    )
+
+        except Exception as e:
+            logger.warning("Error deleting page %s: %s", page_id, e)
 
     def page_is_current(
         self, page_id: int, last_published_at: Optional[str] = None
@@ -409,6 +545,31 @@ class ChromaStore:
                     except (KeyError, AttributeError):
                         continue
                 return found
+
+            if self.backend == "pgvector":
+                cid = self._pg_collection_id()
+                if not cid:
+                    return False
+                from sqlalchemy import text as sa_text
+
+                with self._pg_engine.connect() as conn:
+                    row = conn.execute(
+                        sa_text(
+                            "SELECT cmetadata->>'last_published_at' "
+                            "FROM langchain_pg_embedding "
+                            "WHERE collection_id = :cid "
+                            "AND cmetadata->>'page_id' = :pid "
+                            "LIMIT 1"
+                        ),
+                        {"cid": cid, "pid": str(page_id)},
+                    ).fetchone()
+
+                if row is None:
+                    return False  # page not indexed yet
+                if last_published_at is None:
+                    return True
+                return row[0] == last_published_at
+
         except Exception:
             return False
 
@@ -484,13 +645,65 @@ class ChromaStore:
                     self.db.delete(ids=ids_to_delete)
                     self.db.save_local(self.path, index_name=self.collection)
                     deleted = len(ids_to_delete)
+
+            elif self.backend == "pgvector":
+                cid = self._pg_collection_id()
+                if not cid:
+                    return 0
+                from sqlalchemy import text as sa_text
+
+                # page_id is stored as a JSON number; ->> returns it as text.
+                live_id_strings = [str(i) for i in live_ids]
+
+                with self._pg_engine.begin() as conn:
+                    if source:
+                        result = conn.execute(
+                            sa_text(
+                                "DELETE FROM langchain_pg_embedding "
+                                "WHERE collection_id = :cid "
+                                "AND cmetadata->>'source' = :source "
+                                "AND NOT (cmetadata->>'page_id' = ANY(:live_ids))"
+                            ),
+                            {"cid": cid, "source": source, "live_ids": live_id_strings},
+                        )
+                    else:
+                        result = conn.execute(
+                            sa_text(
+                                "DELETE FROM langchain_pg_embedding "
+                                "WHERE collection_id = :cid "
+                                "AND NOT (cmetadata->>'page_id' = ANY(:live_ids))"
+                            ),
+                            {"cid": cid, "live_ids": live_id_strings},
+                        )
+                    deleted = result.rowcount
+
         except Exception:
             return 0
 
         return deleted
 
-    def upsert(self, documents: List):
-        """Upsert documents with deterministic IDs to prevent duplicates."""
+    def save(self) -> None:
+        """Persist the vector store to disk.
+
+        - **FAISS**: writes the index and docstore pickle files.
+        - **ChromaDB**: no-op — ChromaDB auto-persists on every write.
+        - **pgvector**: no-op — PostgreSQL commits are transactional and durable.
+
+        Call this explicitly after a bulk indexing run to avoid writing the
+        FAISS index file after every single page.
+        """
+        if self.backend == "faiss":
+            self.db.save_local(self.path, index_name=self.collection)
+
+    def upsert(self, documents: List, save: bool = True) -> None:
+        """Upsert documents with deterministic IDs to prevent duplicates.
+
+        Args:
+            documents: LangChain Document objects to add/update.
+            save: If True (default), persist the FAISS index to disk immediately.
+                  Pass False during bulk indexing and call save() once at the end
+                  to avoid writing the index file after every page.
+        """
         if not documents:
             return
 
@@ -507,6 +720,7 @@ class ChromaStore:
         # Add documents
         if self.backend == "chroma":
             self.db.add_documents(documents, ids=ids)
+
         elif self.backend == "faiss":
             # Delete existing IDs first
             if hasattr(self.db, "index_to_docstore_id"):
@@ -520,7 +734,28 @@ class ChromaStore:
                         pass
 
             self.db.add_documents(documents, ids=ids)
-            self.db.save_local(self.path, index_name=self.collection)
+            if save:
+                self.db.save_local(self.path, index_name=self.collection)
+
+        elif self.backend == "pgvector":
+            # langchain_pg_embedding has no unique constraint on custom_id, so
+            # calling add_documents twice with the same IDs creates duplicates.
+            # Delete any existing rows for these custom_ids first.
+            cid = self._pg_collection_id()
+            if cid and ids:
+                from sqlalchemy import text as sa_text
+
+                with self._pg_engine.begin() as conn:
+                    conn.execute(
+                        sa_text(
+                            "DELETE FROM langchain_pg_embedding "
+                            "WHERE collection_id = :cid "
+                            "AND custom_id = ANY(:ids)"
+                        ),
+                        {"cid": cid, "ids": ids},
+                    )
+            self.db.add_documents(documents, ids=ids)
+            # pgvector persists to PostgreSQL automatically; save() is a no-op.
 
 
 # ============================================================================
@@ -644,6 +879,9 @@ def build_rag_index(
 
     total_docs = 0
     total_pages = 0
+    batch_size = getattr(
+        settings, "WAGTAIL_RAG_EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE
+    )
 
     if not page_to_documents_api_extractor:
         _write(stdout, "ERROR: api_fields_extractor not available")
@@ -677,7 +915,12 @@ def build_rag_index(
             model_field_names = get_content_field_names(model)
             _write(stdout, f"  Extracting fields: {', '.join(model_field_names)}")
 
-        # Extract documents from each page
+        # Collect documents from all pages in this model before embedding.
+        # Batching across pages means one embedding API call per batch_size
+        # documents rather than one call per page, which is significantly
+        # faster for both API providers and local models.
+        pending_docs: List = []
+
         for page_idx, page in enumerate(pages, 1):
             try:
                 _write(stdout, f"  [{page_idx}/{count}] {page.title} (ID: {page.id})")
@@ -719,25 +962,23 @@ def build_rag_index(
                         stdout,
                         f"      Skipped: {', '.join(not_indexed)} (empty or missing)",
                     )
-                _write(stdout, f"      Created {len(docs)} document(s)")
+                _write(stdout, f"      Queued {len(docs)} document(s) for embedding")
 
-                extractor_used = "api_fields_extractor"
-
-                # Add model metadata (including which extractor was used)
+                # Add model metadata
                 for doc in docs:
                     doc.metadata.update(
                         {
                             "source": model_name,
                             "model": model.__name__,
                             "app": model._meta.app_label,
-                            "extractor": extractor_used,
+                            "extractor": "api_fields_extractor",
                         }
                     )
 
-                # Save to vector store
+                # Delete old chunks for this page immediately so re-indexing
+                # a single page never leaves stale chunks behind.
                 store.delete_page(page.id)
-                store.upsert(docs)
-                _write(stdout, f"      Saved to vector store")
+                pending_docs.extend(docs)
 
                 total_docs += len(docs)
                 total_pages += 1
@@ -747,6 +988,15 @@ def build_rag_index(
                 logger.exception(f"Error indexing page {page.id}")
                 if stdout:
                     _write(stdout, f"      {traceback.format_exc()}")
+
+        # Embed and store all collected documents in batches, then save once.
+        if pending_docs:
+            _write(
+                stdout,
+                f"\n  Embedding {len(pending_docs)} document(s) "
+                f"in batch(es) of {batch_size} ...",
+            )
+            _upsert_in_batches(store, pending_docs, batch_size, stdout)
 
         _prune_deleted_documents_for_model(
             store=store,

@@ -42,13 +42,15 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
     GET parameters:
         q: Question (required)
         filter: JSON string for metadata filter (optional, e.g., '{"model": "BreadPage"}')
+        search_only: Return only semantic search results without LLM generation (optional, "true" or "false")
 
     POST data:
     {
         "question": "What types of bread do you have?",
         "filter": {"model": "BreadPage"},  # optional metadata filter
         "llm_kwargs": {"temperature": 0.7},  # optional LLM-specific parameters
-        "session_id": "abc123"  # optional session identifier for chat history
+        "session_id": "abc123",  # optional session identifier for chat history
+        "search_only": false  # optional, skip LLM generation and return only search results
     }
 
     Note: LLM provider and model come from Django settings (WAGTAIL_RAG_LLM_PROVIDER, WAGTAIL_RAG_MODEL_NAME)
@@ -68,6 +70,8 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             question = (request.GET.get("q") or "").strip()
             filter_str = request.GET.get("filter", "")
             session_id = (request.GET.get("session_id") or "").strip() or None
+            search_only_str = (request.GET.get("search_only") or "").strip().lower()
+            search_only = search_only_str in ("true", "1", "yes")
             metadata_filter: Optional[dict] = None
             if filter_str:
                 try:
@@ -99,6 +103,7 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             metadata_filter = data.get("filter")
             llm_kwargs = data.get("llm_kwargs") or {}
             session_id = (data.get("session_id") or "").strip() or None
+            search_only = bool(data.get("search_only", False))
 
         if not question:
             return JsonResponse(
@@ -130,7 +135,7 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
         )
 
         chatbot = get_chatbot(metadata_filter=metadata_filter, llm_kwargs=llm_kwargs)
-        result = chatbot.query(question, session_id=session_id)
+        result = chatbot.query(question, session_id=session_id, search_only=search_only)
 
         if use_chat_history and session_id:
             result["session_id"] = session_id

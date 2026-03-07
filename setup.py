@@ -26,7 +26,6 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
@@ -34,7 +33,7 @@ setup(
         "Framework :: Django",
         "Framework :: Wagtail",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     install_requires=[
         "langchain>=0.1.0",
         "langchain-community>=0.0.20",
@@ -43,7 +42,7 @@ setup(
         "tiktoken>=0.5.0",
     ],
     extras_require={
-        # Vector store backends (install at least one)
+        # ── Vector store backends (install at least one) ──────────────────
         "faiss": [
             "faiss-cpu>=1.7.4",
         ],
@@ -53,39 +52,49 @@ setup(
         "chroma": [
             "chromadb>=0.4.0",
         ],
-        # Embedding providers (install only what you need)
+        "pgvector": [
+            "psycopg2-binary>=2.9.0",
+            "sqlalchemy>=2.0.0",
+        ],
+        # ── Embedding providers (install only what you need) ──────────────
         "huggingface": [
             "langchain-huggingface>=0.0.1",
+            "sentence-transformers>=2.2.0",
+        ],
+        "sentence-transformers": [
             "sentence-transformers>=2.2.0",
         ],
         "openai": [
             "langchain-openai>=0.0.1",
         ],
-        # LLM providers (install only what you need)
+        # ── LLM providers (install only what you need) ────────────────────
         "ollama": [
             "ollama>=0.1.0",
         ],
         "anthropic": [
             "langchain-anthropic>=0.0.1",
         ],
-        # Common local setup (HuggingFace embeddings + Ollama LLM + FAISS)
+        # ── Convenience bundles ───────────────────────────────────────────
+        # Local: HuggingFace embeddings + Ollama LLM + FAISS
         "local": [
             "faiss-cpu>=1.7.4",
-            "langchain-huggingface>=0.0.1",
             "sentence-transformers>=2.2.0",
+            "langchain-huggingface>=0.0.1",
             "ollama>=0.1.0",
         ],
-        # All providers (for convenience)
+        # All providers
         "all": [
             "faiss-cpu>=1.7.4",
             "chromadb>=0.4.0",
-            "langchain-huggingface>=0.0.1",
+            "psycopg2-binary>=2.9.0",
+            "sqlalchemy>=2.0.0",
             "sentence-transformers>=2.2.0",
+            "langchain-huggingface>=0.0.1",
             "langchain-openai>=0.0.1",
             "ollama>=0.1.0",
             "langchain-anthropic>=0.0.1",
         ],
-        # Development dependencies
+        # ── Development / test ────────────────────────────────────────────
         "dev": [
             "black",
             "flake8",
@@ -93,7 +102,6 @@ setup(
             "pytest-django>=4.5.0",
             "pytest-cov>=4.0.0",
         ],
-        # Test dependencies
         "test": [
             "wagtail>=6.0.0",
             "pytest>=7.0.0",

@@ -3,9 +3,13 @@ Tests for embedding and LLM provider factories.
 """
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from wagtail_rag.embeddings.providers import EmbeddingProviderFactory, PROVIDER_DEFAULTS
+from wagtail_rag.embeddings.providers import (
+    EmbeddingProviderFactory,
+    SentenceTransformerProvider,
+    PROVIDER_DEFAULTS,
+)
 from wagtail_rag.llm_providers.providers import LLMProviderFactory
 
 
@@ -46,7 +50,7 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
             )
         )
 
-        # HuggingFace models
+        # HuggingFace models (repo-style names required)
         self.assertTrue(
             self.factory._is_model_compatible(
                 "huggingface", "sentence-transformers/all-MiniLM-L6-v2"
@@ -55,6 +59,41 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
         self.assertFalse(
             self.factory._is_model_compatible("huggingface", "text-embedding-3-small")
         )
+
+        # sentence-transformers accepts both short and repo-style names
+        self.assertTrue(
+            self.factory._is_model_compatible("sentence-transformers", "all-MiniLM-L6-v2")
+        )
+        self.assertTrue(
+            self.factory._is_model_compatible(
+                "sentence-transformers", "sentence-transformers/all-MiniLM-L6-v2"
+            )
+        )
+        self.assertFalse(
+            self.factory._is_model_compatible("sentence-transformers", "text-embedding-3-small")
+        )
+
+    def test_sentence_transformer_provider_is_distinct_from_huggingface(self):
+        """sentence-transformers key must map to SentenceTransformerProvider, not HuggingFaceProvider."""
+        from wagtail_rag.embeddings.providers import HuggingFaceProvider
+        st_cls = EmbeddingProviderFactory.PROVIDER_MAP["sentence-transformers"]
+        hf_cls = EmbeddingProviderFactory.PROVIDER_MAP["huggingface"]
+        self.assertIs(st_cls, SentenceTransformerProvider)
+        self.assertIsNot(st_cls, hf_cls)
+
+    def test_get_embeddings_reads_settings_at_call_time(self):
+        """get_embeddings() must not capture settings at import time (no module singleton)."""
+        from wagtail_rag.embeddings.providers import get_embeddings
+        mock_embedding = MagicMock()
+        with patch(
+            "wagtail_rag.embeddings.providers.EmbeddingProviderFactory.get",
+            return_value=mock_embedding,
+        ) as mock_get:
+            result = get_embeddings(provider="openai", model_name="text-embedding-3-small")
+            mock_get.assert_called_once_with(
+                provider="openai", model_name="text-embedding-3-small"
+            )
+            self.assertIs(result, mock_embedding)
 
     def test_invalid_provider_error(self):
         """Test that invalid provider raises clear error."""
