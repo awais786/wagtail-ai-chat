@@ -143,7 +143,9 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         field.name = "body"
         page.api_fields = [field]
 
-        with patch.object(extractor, "_extract_field_value", return_value="Some body text."):
+        with patch.object(
+            extractor, "_extract_field_value", return_value="Some body text."
+        ):
             docs = extractor.extract_page(page)
 
         self.assertEqual(len(docs), 1)
@@ -153,7 +155,9 @@ class TestWagtailAPIExtractor(unittest.TestCase):
 
     def test_extract_page_large_field_is_split(self):
         """A field larger than size_threshold should produce multiple chunks."""
-        extractor = WagtailAPIExtractor(chunk_size=50, chunk_overlap=0, size_threshold=60)
+        extractor = WagtailAPIExtractor(
+            chunk_size=50, chunk_overlap=0, size_threshold=60
+        )
 
         page = MagicMock()
         page.id = 3

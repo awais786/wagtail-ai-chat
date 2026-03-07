@@ -306,7 +306,9 @@ class RAGChatBot:
             for doc in docs
         ]
 
-    def query(self, question, boost_title_matches=True, session_id=None, search_only=False):
+    def query(
+        self, question, boost_title_matches=True, session_id=None, search_only=False
+    ):
         """
         Query the RAG chatbot with a question.
 
@@ -336,7 +338,9 @@ class RAGChatBot:
 
         # If search_only mode, skip LLM generation and return just the search results
         if search_only:
-            logger.info("Search-only mode: skipping LLM generation, returning semantic search results only")
+            logger.info(
+                "Search-only mode: skipping LLM generation, returning semantic search results only"
+            )
             return {"answer": None, "sources": self._format_sources(docs)}
 
         # Step 2: Generate answer using LLM with retrieved context

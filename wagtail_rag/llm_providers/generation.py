@@ -23,6 +23,7 @@ try:
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.messages import HumanMessage
     from langchain_core.language_models.chat_models import BaseChatModel
+
     LCEL_AVAILABLE = True
 except ImportError:
     # Set to None for graceful degradation
@@ -33,6 +34,7 @@ except ImportError:
 try:
     from langchain.prompts import PromptTemplate
     from langchain.chains import RetrievalQA
+
     LEGACY_AVAILABLE = True
 except ImportError:
     PromptTemplate = RetrievalQA = None

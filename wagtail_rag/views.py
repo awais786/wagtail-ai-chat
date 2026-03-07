@@ -65,15 +65,19 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
     Response 500: {"error": "..."}
     """
     # Read limits at request time so settings changes take effect without restart.
-    max_body   = _settings_int("WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE", 1024 * 1024)
-    max_q_len  = _settings_int("WAGTAIL_RAG_MAX_QUESTION_LENGTH", 0)
+    max_body = _settings_int("WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE", 1024 * 1024)
+    max_q_len = _settings_int("WAGTAIL_RAG_MAX_QUESTION_LENGTH", 0)
     use_history = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
 
     try:
         if request.method == "GET":
-            question        = (request.GET.get("q") or "").strip()
-            session_id      = (request.GET.get("session_id") or "").strip() or None
-            search_only     = (request.GET.get("search_only") or "").lower() in ("true", "1", "yes")
+            question = (request.GET.get("q") or "").strip()
+            session_id = (request.GET.get("session_id") or "").strip() or None
+            search_only = (request.GET.get("search_only") or "").lower() in (
+                "true",
+                "1",
+                "yes",
+            )
             llm_kwargs: dict = {}
 
             filter_str = request.GET.get("filter", "")
@@ -93,7 +97,9 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
                 )
             if not body or not body.strip():
                 return JsonResponse(
-                    {"error": "POST body must be non-empty JSON with a 'question' field."},
+                    {
+                        "error": "POST body must be non-empty JSON with a 'question' field."
+                    },
                     status=400,
                 )
             try:
@@ -102,18 +108,22 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
                 return JsonResponse({"error": f"Invalid JSON: {exc}"}, status=400)
 
             if not isinstance(data, dict):
-                return JsonResponse({"error": "POST body must be a JSON object."}, status=400)
+                return JsonResponse(
+                    {"error": "POST body must be a JSON object."}, status=400
+                )
 
-            question        = (data.get("question") or "").strip()
-            session_id      = (data.get("session_id") or "").strip() or None
-            search_only     = bool(data.get("search_only", False))
+            question = (data.get("question") or "").strip()
+            session_id = (data.get("session_id") or "").strip() or None
+            search_only = bool(data.get("search_only", False))
             metadata_filter = _validate_metadata_filter(data.get("filter"))
-            llm_kwargs      = _sanitize_llm_kwargs(data.get("llm_kwargs"))
+            llm_kwargs = _sanitize_llm_kwargs(data.get("llm_kwargs"))
 
         # ── validate question ─────────────────────────────────────────
         if not question:
             return JsonResponse(
-                {"error": "Question is required. Use 'q' for GET or 'question' for POST."},
+                {
+                    "error": "Question is required. Use 'q' for GET or 'question' for POST."
+                },
                 status=400,
             )
 

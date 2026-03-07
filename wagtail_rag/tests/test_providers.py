@@ -62,7 +62,9 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
 
         # sentence-transformers accepts both short and repo-style names
         self.assertTrue(
-            self.factory._is_model_compatible("sentence-transformers", "all-MiniLM-L6-v2")
+            self.factory._is_model_compatible(
+                "sentence-transformers", "all-MiniLM-L6-v2"
+            )
         )
         self.assertTrue(
             self.factory._is_model_compatible(
@@ -70,12 +72,15 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
             )
         )
         self.assertFalse(
-            self.factory._is_model_compatible("sentence-transformers", "text-embedding-3-small")
+            self.factory._is_model_compatible(
+                "sentence-transformers", "text-embedding-3-small"
+            )
         )
 
     def test_sentence_transformer_provider_is_distinct_from_huggingface(self):
         """sentence-transformers key must map to SentenceTransformerProvider, not HuggingFaceProvider."""
         from wagtail_rag.embeddings.providers import HuggingFaceProvider
+
         st_cls = EmbeddingProviderFactory.PROVIDER_MAP["sentence-transformers"]
         hf_cls = EmbeddingProviderFactory.PROVIDER_MAP["huggingface"]
         self.assertIs(st_cls, SentenceTransformerProvider)
@@ -84,12 +89,15 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
     def test_get_embeddings_reads_settings_at_call_time(self):
         """get_embeddings() must not capture settings at import time (no module singleton)."""
         from wagtail_rag.embeddings.providers import get_embeddings
+
         mock_embedding = MagicMock()
         with patch(
             "wagtail_rag.embeddings.providers.EmbeddingProviderFactory.get",
             return_value=mock_embedding,
         ) as mock_get:
-            result = get_embeddings(provider="openai", model_name="text-embedding-3-small")
+            result = get_embeddings(
+                provider="openai", model_name="text-embedding-3-small"
+            )
             mock_get.assert_called_once_with(
                 provider="openai", model_name="text-embedding-3-small"
             )

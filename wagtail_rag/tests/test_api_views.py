@@ -65,7 +65,9 @@ class TestChatAPI(TestCase):
     def test_json_array_body_returns_400(self):
         """POST body that is a JSON array (not object) returns 400."""
         request = self.factory.post(
-            "/api/rag/chat/", data=json.dumps(["a", "b"]), content_type="application/json"
+            "/api/rag/chat/",
+            data=json.dumps(["a", "b"]),
+            content_type="application/json",
         )
         self.assertEqual(rag_chat_api(request).status_code, 400)
 
@@ -86,18 +88,22 @@ class TestChatAPI(TestCase):
 
         request = self.factory.post(
             "/api/rag/chat/",
-            data=json.dumps({
-                "question": "test",
-                "session_id": "sess-abc",
-                "filter": {"model": "BlogPage"},
-            }),
+            data=json.dumps(
+                {
+                    "question": "test",
+                    "session_id": "sess-abc",
+                    "filter": {"model": "BlogPage"},
+                }
+            ),
             content_type="application/json",
         )
         response = rag_chat_api(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(mock_chatbot.query.call_args[1]["session_id"], "sess-abc")
-        self.assertEqual(mock_get_chatbot.call_args[1]["metadata_filter"], {"model": "BlogPage"})
+        self.assertEqual(
+            mock_get_chatbot.call_args[1]["metadata_filter"], {"model": "BlogPage"}
+        )
 
     @patch("wagtail_rag.views.get_chatbot")
     def test_llm_kwargs_sanitised(self, mock_get_chatbot):
@@ -108,13 +114,15 @@ class TestChatAPI(TestCase):
 
         request = self.factory.post(
             "/api/rag/chat/",
-            data=json.dumps({
-                "question": "hi",
-                "llm_kwargs": {
-                    "temperature": 0.5,      # allowed
-                    "evil_param": "hack",    # should be stripped
-                },
-            }),
+            data=json.dumps(
+                {
+                    "question": "hi",
+                    "llm_kwargs": {
+                        "temperature": 0.5,  # allowed
+                        "evil_param": "hack",  # should be stripped
+                    },
+                }
+            ),
             content_type="application/json",
         )
         rag_chat_api(request)

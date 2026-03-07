@@ -153,7 +153,9 @@ class SentenceTransformerProvider(BaseEmbeddingProvider):
 
     def create(self, model_name: Optional[str], **kwargs) -> Any:
         if not model_name:
-            raise ValueError("model_name is required for sentence-transformers embeddings")
+            raise ValueError(
+                "model_name is required for sentence-transformers embeddings"
+            )
 
         # Prefer the dedicated SentenceTransformerEmbeddings class.
         for module_path, class_name in [
@@ -221,7 +223,9 @@ class EmbeddingProviderFactory:
             return "/" in model_name and not model_name.startswith("text-embedding-")
         if provider in {"sentence-transformers", "sentence_transformers"}:
             # Accept both short names (all-MiniLM-L6-v2) and repo-style names.
-            return not model_name.startswith("text-embedding-") and not model_name.startswith("gpt-")
+            return not model_name.startswith(
+                "text-embedding-"
+            ) and not model_name.startswith("gpt-")
         if provider == "ollama":
             # Ollama model names are short local tags, not HF paths or OpenAI names.
             return ("/" not in model_name) and (
@@ -334,7 +338,9 @@ def get_embeddings(
     This is important for tests that override settings and for apps that
     configure settings after the module is first imported.
     """
-    return EmbeddingProviderFactory().get(provider=provider, model_name=model_name, **kwargs)
+    return EmbeddingProviderFactory().get(
+        provider=provider, model_name=model_name, **kwargs
+    )
 
 
 __all__ = [

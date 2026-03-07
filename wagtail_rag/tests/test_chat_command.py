@@ -40,8 +40,12 @@ class TestRagChatCompat(TestCase):
         # Valid filter
         out = StringIO()
         call_command(
-            "rag", "chat", "-q", "test",
-            "--filter", '{"model": "BlogPage"}',
+            "rag",
+            "chat",
+            "-q",
+            "test",
+            "--filter",
+            '{"model": "BlogPage"}',
             "--no-sources",
             stdout=out,
         )
@@ -51,11 +55,27 @@ class TestRagChatCompat(TestCase):
 
         # Invalid JSON
         with self.assertRaises(SystemExit):
-            call_command("rag", "chat", "-q", "test", "--filter", "invalid-json", stdout=StringIO())
+            call_command(
+                "rag",
+                "chat",
+                "-q",
+                "test",
+                "--filter",
+                "invalid-json",
+                stdout=StringIO(),
+            )
 
         # Non-dict JSON
         with self.assertRaises(SystemExit):
-            call_command("rag", "chat", "-q", "test", "--filter", '["not","a","dict"]', stdout=StringIO())
+            call_command(
+                "rag",
+                "chat",
+                "-q",
+                "test",
+                "--filter",
+                '["not","a","dict"]',
+                stdout=StringIO(),
+            )
 
 
 if __name__ == "__main__":
