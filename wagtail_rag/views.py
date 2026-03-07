@@ -10,7 +10,7 @@ from typing import Optional
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
 from .rag_chatbot import get_chatbot
@@ -41,13 +41,20 @@ def _sanitize_llm_kwargs(raw) -> dict:
 
 
 @require_http_methods(["GET", "POST"])
-@csrf_exempt
 def rag_chat_api(request: HttpRequest) -> JsonResponse:
     """
     Chat API endpoint.
 
-    CSRF is exempt — this endpoint is for programmatic / cross-origin use.
-    Protect it at the network level (auth, rate limiting) if publicly exposed.
+    CSRF protection is enforced for POST requests — the client must include the
+    Django CSRF token either as the X-CSRFToken request header or as the
+    csrfmiddlewaretoken POST field.  GET requests are CSRF-safe by definition.
+
+    The embedded chatbox widget reads the csrftoken cookie and sends it
+    automatically.  External / programmatic clients should first GET any page
+    (which sets the cookie via ensure_csrf_cookie) and then mirror the token.
+
+    Protect this endpoint at the network level (auth, rate limiting) if it is
+    publicly exposed.
 
     GET  ?q=<question>[&session_id=<id>][&filter=<json>][&search_only=true]
     POST {"question": "...", "session_id": "...", "filter": {}, "llm_kwargs": {}, "search_only": false}
@@ -147,6 +154,11 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
         )
 
 
+@ensure_csrf_cookie
 def rag_chatbox_widget(request: HttpRequest) -> HttpResponse:
-    """Serve the RAG chatbox widget as a standalone page (for testing)."""
+    """Serve the RAG chatbox widget as a standalone page (for testing).
+
+    @ensure_csrf_cookie guarantees the csrftoken cookie is set on this response
+    so the embedded JS can read it for subsequent POST requests.
+    """
     return render(request, "wagtail_rag/chatbox.html")

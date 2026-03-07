@@ -251,6 +251,12 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
     var sendBtn   = document.getElementById('cb-send');
     var emptyNote = document.getElementById('cb-empty');
 
+    /* ── CSRF ─────────────────────────────────────────────────────── */
+    function getCsrfToken() {
+      var match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+
     /* ── session ──────────────────────────────────────────────────── */
     var sessionId = sessionStorage.getItem(SESSION_KEY);
 
@@ -345,7 +351,10 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
 
       fetch(CHAT_API, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCsrfToken()
+        },
         body: JSON.stringify({ question: q, session_id: sessionId })
       })
       .then(function (res) {

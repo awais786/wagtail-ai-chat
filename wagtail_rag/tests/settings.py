@@ -45,7 +45,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-# No ROOT_URLCONF needed since we don't use URL routing in tests
+ROOT_URLCONF = "wagtail_rag.urls"
 
 TEMPLATES = [
     {
