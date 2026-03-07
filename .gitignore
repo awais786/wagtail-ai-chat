@@ -61,3 +61,11 @@ htmlcov/
 # Tox
 .tox/
 
+
+# Cursor IDE
+.cursor/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/

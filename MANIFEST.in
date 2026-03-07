@@ -1,5 +1,4 @@
 include README.md
-include requirements.txt
 include LICENSE
 recursive-include wagtail_rag *.py
 recursive-include wagtail_rag/templates *
