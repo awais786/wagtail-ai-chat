@@ -40,6 +40,7 @@ def _sanitize_llm_kwargs(raw) -> dict:
     return {k: v for k, v in raw.items() if k in _ALLOWED_LLM_KWARGS}
 
 
+@ensure_csrf_cookie
 @require_http_methods(["GET", "POST"])
 def rag_chat_api(request: HttpRequest) -> JsonResponse:
     """

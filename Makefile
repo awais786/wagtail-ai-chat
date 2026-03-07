@@ -1,28 +1,57 @@
 # Makefile for Wagtail RAG Chatbot
 
-.PHONY: help index index-reset index-rebuild chat test-rag test-rag-search test test-cov lint format clean runserver
+.PHONY: help install install-dev install-local install-openai install-all \
+        index index-reset index-rebuild \
+        chat test-rag test-rag-search \
+        test test-cov lint format clean runserver
 
 # Default target
 help:
 	@echo "Wagtail RAG — available targets:"
 	@echo ""
-	@echo "  Index management:"
-	@echo "    index          Build the RAG index"
-	@echo "    index-reset    Clear the index without re-indexing"
-	@echo "    index-rebuild  Clear then rebuild the index"
+	@echo "  Setup:"
+	@echo "    install          Install package (no extras)"
+	@echo "    install-dev      Install with test/dev dependencies"
+	@echo "    install-local    Install with local stack (FAISS + Sentence Transformers + Ollama)"
+	@echo "    install-openai   Install with OpenAI provider"
+	@echo "    install-all      Install all providers"
 	@echo ""
-	@echo "  Chat / testing:"
-	@echo "    chat           Start interactive chat session"
-	@echo "    test-rag       Run smoke tests against the live pipeline"
+	@echo "  Index management:"
+	@echo "    index            Build the RAG index"
+	@echo "    index-reset      Clear the index without re-indexing"
+	@echo "    index-rebuild    Clear then rebuild the index"
+	@echo ""
+	@echo "  Chat / pipeline testing:"
+	@echo "    chat             Start interactive chat session"
+	@echo "    test-rag         Smoke-test the full pipeline (search + LLM)"
+	@echo "    test-rag-search  Smoke-test retrieval only (no LLM call)"
 	@echo ""
 	@echo "  Development:"
-	@echo "    test           Run unit test suite"
-	@echo "    lint           Check formatting and style"
-	@echo "    format         Auto-format with black"
-	@echo "    clean          Remove Python cache files"
-	@echo "    runserver      Start Django development server"
+	@echo "    test             Run unit test suite"
+	@echo "    test-cov         Run tests with coverage report"
+	@echo "    lint             Check formatting and style"
+	@echo "    format           Auto-format with black"
+	@echo "    clean            Remove Python cache and build files"
+	@echo "    runserver        Start Django development server"
 
-# ── Index management ─────────────────────────────────────────────────────────
+# ── Setup ─────────────────────────────────────────────────────────────────────
+
+install:
+	pip install -e .
+
+install-dev:
+	pip install -e ".[test,dev]"
+
+install-local:
+	pip install -e ".[local,test,dev]"
+
+install-openai:
+	pip install -e ".[openai,test,dev]"
+
+install-all:
+	pip install -e ".[all,test,dev]"
+
+# ── Index management ──────────────────────────────────────────────────────────
 
 index:
 	python manage.py rag index
@@ -38,11 +67,9 @@ index-rebuild: index-reset index
 chat:
 	python manage.py rag chat
 
-# Smoke-test the full pipeline (retrieval + LLM) with built-in questions
 test-rag:
 	python manage.py rag test
 
-# Smoke-test retrieval only (faster, no LLM call)
 test-rag-search:
 	python manage.py rag test --search-only
 
