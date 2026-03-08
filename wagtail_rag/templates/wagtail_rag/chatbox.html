@@ -1,42 +1,43 @@
 {% comment %}
 Wagtail RAG chatbox widget — include this as a partial, not a standalone page.
 
-Usage in base.html:
-    <div style="position:fixed;bottom:1rem;right:1rem;z-index:9999;">
-        {% include "wagtail_rag/chatbox.html" %}
-    </div>
+Usage in base.html (typically just before </body>):
+    {% include "wagtail_rag/chatbox.html" %}
+
+The widget renders a floating action button (bottom-right). Clicking it opens
+the chat panel. No wrapper div or positioning needed in the host template.
 
 Theming: override CSS custom properties in your site's stylesheet, e.g.:
-    #rag-chatbox-root { --chatbox-primary: #your-brand-color; }
+    #rag-chatbox-root { --cb-primary: #your-brand-color; }
 {% endcomment %}
 
-<div id="rag-chatbox-root">
+<div id="rag-chatbox-root" data-api-url="{% url 'rag_chat_api' %}">
   <style>
     /* Scoped to #rag-chatbox-root — does not affect the host page */
     #rag-chatbox-root {
-      --chatbox-primary:         #667eea;
-      --chatbox-primary-dark:    #5568d3;
-      --chatbox-secondary:       #764ba2;
-      --chatbox-bg:              #ffffff;
-      --chatbox-border:          #e9ecef;
-      --chatbox-text:            #212529;
-      --chatbox-text-muted:      #6c757d;
-      --chatbox-user-bg:         #667eea;
-      --chatbox-user-text:       #ffffff;
-      --chatbox-bot-bg:          #f1f3f5;
-      --chatbox-bot-text:        #212529;
-      --chatbox-error-bg:        #fff0f0;
-      --chatbox-error-text:      #c0392b;
-      --chatbox-error-border:    #f5c6cb;
-      --chatbox-link:            #667eea;
-      --chatbox-disabled:        #cccccc;
-      --chatbox-font:            -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      --chatbox-radius:          12px;
-      --chatbox-radius-lg:       18px;
-      --chatbox-radius-pill:     24px;
-      --chatbox-shadow:          0 4px 20px rgba(0,0,0,0.15);
+      --cb-primary:        #667eea;
+      --cb-primary-dark:   #5568d3;
+      --cb-secondary:      #764ba2;
+      --cb-bg:             #ffffff;
+      --cb-border:         #e9ecef;
+      --cb-text:           #212529;
+      --cb-text-muted:     #6c757d;
+      --cb-user-bg:        #667eea;
+      --cb-user-text:      #ffffff;
+      --cb-bot-bg:         #f1f3f5;
+      --cb-bot-text:       #212529;
+      --cb-error-bg:       #fff0f0;
+      --cb-error-text:     #c0392b;
+      --cb-error-border:   #f5c6cb;
+      --cb-link:           #667eea;
+      --cb-disabled:       #cccccc;
+      --cb-font:           -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --cb-radius:         12px;
+      --cb-radius-msg:     18px;
+      --cb-shadow:         0 8px 32px rgba(0,0,0,0.18);
+      --cb-fab-size:       56px;
 
-      font-family: var(--chatbox-font);
+      font-family: var(--cb-font);
       box-sizing: border-box;
     }
 
@@ -46,45 +47,115 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
       padding: 0;
     }
 
-    #rag-chatbox-root .cb-container {
-      width: 360px;
-      background: var(--chatbox-bg);
-      border-radius: var(--chatbox-radius);
-      box-shadow: var(--chatbox-shadow);
-      overflow: hidden;
+    /* ── FAB toggle ──────────────────────────────────────────────────── */
+    #rag-chatbox-root .cb-fab {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 9998;
+      width: var(--cb-fab-size);
+      height: var(--cb-fab-size);
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--cb-primary), var(--cb-secondary));
+      border: none;
+      cursor: pointer;
+      box-shadow: var(--cb-shadow);
       display: flex;
-      flex-direction: column;
-      height: 520px;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s, box-shadow 0.2s;
+      color: #fff;
     }
 
+    #rag-chatbox-root .cb-fab:hover {
+      transform: scale(1.08);
+      box-shadow: 0 12px 36px rgba(0,0,0,0.22);
+    }
+
+    #rag-chatbox-root .cb-fab svg { display: block; }
+
+    /* ── Panel ───────────────────────────────────────────────────────── */
+    #rag-chatbox-root .cb-panel {
+      position: fixed;
+      bottom: 92px;
+      right: 24px;
+      z-index: 9999;
+      width: 360px;
+      height: 520px;
+      background: var(--cb-bg);
+      border-radius: var(--cb-radius);
+      box-shadow: var(--cb-shadow);
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      transform-origin: bottom right;
+      animation: cb-open 0.2s ease;
+    }
+
+    #rag-chatbox-root .cb-panel.open {
+      display: flex;
+    }
+
+    @keyframes cb-open {
+      from { opacity: 0; transform: scale(0.92); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+
+    /* ── Header ──────────────────────────────────────────────────────── */
     #rag-chatbox-root .cb-header {
-      background: linear-gradient(135deg, var(--chatbox-primary) 0%, var(--chatbox-secondary) 100%);
-      color: var(--chatbox-user-text);
-      padding: 16px 20px;
+      background: linear-gradient(135deg, var(--cb-primary) 0%, var(--cb-secondary) 100%);
+      color: #fff;
+      padding: 14px 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-shrink: 0;
     }
 
     #rag-chatbox-root .cb-header h2 {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 600;
-      color: var(--chatbox-user-text);
+      color: #fff;
     }
 
+    #rag-chatbox-root .cb-header-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    #rag-chatbox-root .cb-icon-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: rgba(255,255,255,0.8);
+      padding: 4px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    #rag-chatbox-root .cb-icon-btn:hover {
+      color: #fff;
+      background: rgba(255,255,255,0.15);
+    }
+
+    /* ── Messages ────────────────────────────────────────────────────── */
     #rag-chatbox-root .cb-messages {
       flex: 1;
       overflow-y: auto;
       padding: 16px;
-      background: var(--chatbox-bg);
+      background: var(--cb-bg);
       display: flex;
       flex-direction: column;
       gap: 12px;
+      scroll-behavior: smooth;
     }
 
     #rag-chatbox-root .cb-empty {
       text-align: center;
-      color: var(--chatbox-text-muted);
+      color: var(--cb-text-muted);
       padding: 40px 20px;
       font-size: 14px;
     }
@@ -92,7 +163,7 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
     #rag-chatbox-root .cb-message {
       display: flex;
       flex-direction: column;
-      animation: cb-fade-in 0.25s ease;
+      animation: cb-fade-in 0.2s ease;
     }
 
     @keyframes cb-fade-in {
@@ -106,7 +177,7 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
     #rag-chatbox-root .cb-bubble {
       max-width: 82%;
       padding: 10px 14px;
-      border-radius: var(--chatbox-radius-lg);
+      border-radius: var(--cb-radius-msg);
       font-size: 14px;
       line-height: 1.5;
       word-break: break-word;
@@ -114,98 +185,139 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
     }
 
     #rag-chatbox-root .cb-message.user .cb-bubble {
-      background: var(--chatbox-user-bg);
-      color: var(--chatbox-user-text);
+      background: var(--cb-user-bg);
+      color: var(--cb-user-text);
       border-bottom-right-radius: 4px;
     }
 
     #rag-chatbox-root .cb-message.bot .cb-bubble {
-      background: var(--chatbox-bot-bg);
-      color: var(--chatbox-bot-text);
+      background: var(--cb-bot-bg);
+      color: var(--cb-bot-text);
       border-bottom-left-radius: 4px;
     }
 
     #rag-chatbox-root .cb-message.bot .cb-bubble.error {
-      background: var(--chatbox-error-bg);
-      color: var(--chatbox-error-text);
-      border: 1px solid var(--chatbox-error-border);
+      background: var(--cb-error-bg);
+      color: var(--cb-error-text);
+      border: 1px solid var(--cb-error-border);
     }
 
+    /* ── Typing indicator ────────────────────────────────────────────── */
+    #rag-chatbox-root .cb-typing {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 12px 14px;
+      background: var(--cb-bot-bg);
+      border-radius: var(--cb-radius-msg);
+      border-bottom-left-radius: 4px;
+      width: fit-content;
+    }
+
+    #rag-chatbox-root .cb-typing span {
+      width: 7px;
+      height: 7px;
+      background: var(--cb-text-muted);
+      border-radius: 50%;
+      animation: cb-bounce 1.2s infinite;
+    }
+
+    #rag-chatbox-root .cb-typing span:nth-child(2) { animation-delay: 0.2s; }
+    #rag-chatbox-root .cb-typing span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes cb-bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30%            { transform: translateY(-5px); opacity: 1; }
+    }
+
+    /* ── Sources ─────────────────────────────────────────────────────── */
     #rag-chatbox-root .cb-sources {
-      margin-top: 6px;
+      margin-top: 4px;
       font-size: 11px;
-      color: var(--chatbox-text-muted);
+      color: var(--cb-text-muted);
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
       max-width: 82%;
     }
 
-    #rag-chatbox-root .cb-sources span { font-weight: 600; }
+    #rag-chatbox-root .cb-sources strong { font-weight: 600; }
 
     #rag-chatbox-root .cb-sources a {
-      color: var(--chatbox-link);
+      color: var(--cb-link);
       text-decoration: none;
     }
 
     #rag-chatbox-root .cb-sources a:hover { text-decoration: underline; }
 
+    /* ── Footer / input ──────────────────────────────────────────────── */
     #rag-chatbox-root .cb-footer {
-      padding: 12px 16px;
-      border-top: 1px solid var(--chatbox-border);
-      background: var(--chatbox-bg);
+      padding: 10px 14px;
+      border-top: 1px solid var(--cb-border);
+      background: var(--cb-bg);
+      flex-shrink: 0;
     }
 
     #rag-chatbox-root .cb-input-row {
       display: flex;
       gap: 8px;
+      align-items: flex-end;
     }
 
     #rag-chatbox-root .cb-input {
       flex: 1;
       padding: 10px 14px;
-      border: 2px solid var(--chatbox-border);
-      border-radius: var(--chatbox-radius-pill);
+      border: 2px solid var(--cb-border);
+      border-radius: 18px;
       font-size: 14px;
-      font-family: var(--chatbox-font);
+      font-family: var(--cb-font);
       outline: none;
       transition: border-color 0.2s;
-      color: var(--chatbox-text);
-      background: var(--chatbox-bg);
+      color: var(--cb-text);
+      background: var(--cb-bg);
+      resize: none;
+      overflow-y: hidden;
+      min-height: 40px;
+      max-height: 120px;
+      line-height: 1.4;
     }
 
-    #rag-chatbox-root .cb-input:focus { border-color: var(--chatbox-primary); }
+    #rag-chatbox-root .cb-input:focus { border-color: var(--cb-primary); }
 
     #rag-chatbox-root .cb-send {
-      padding: 10px 20px;
-      background: var(--chatbox-primary);
-      color: var(--chatbox-user-text);
+      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      background: var(--cb-primary);
+      color: #fff;
       border: none;
-      border-radius: var(--chatbox-radius-pill);
-      font-size: 14px;
-      font-weight: 600;
-      font-family: var(--chatbox-font);
+      border-radius: 50%;
       cursor: pointer;
-      transition: background 0.2s;
-      white-space: nowrap;
+      transition: background 0.2s, transform 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
-    #rag-chatbox-root .cb-send:hover:not(:disabled) { background: var(--chatbox-primary-dark); }
+    #rag-chatbox-root .cb-send:hover:not(:disabled) {
+      background: var(--cb-primary-dark);
+      transform: scale(1.05);
+    }
 
     #rag-chatbox-root .cb-send:disabled {
-      background: var(--chatbox-disabled);
+      background: var(--cb-disabled);
       cursor: not-allowed;
+      transform: none;
     }
 
     #rag-chatbox-root .cb-spinner {
       display: inline-block;
-      width: 14px;
-      height: 14px;
+      width: 16px;
+      height: 16px;
       border: 2px solid rgba(255,255,255,0.4);
       border-top-color: #fff;
       border-radius: 50%;
       animation: cb-spin 0.7s linear infinite;
-      vertical-align: middle;
     }
 
     @keyframes cb-spin {
@@ -213,27 +325,54 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
     }
   </style>
 
-  <div class="cb-container">
+  <!-- Floating action button -->
+  <button class="cb-fab" id="cb-fab" aria-label="Open chat" aria-expanded="false" aria-controls="cb-panel">
+    <!-- Chat icon -->
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+  </button>
+
+  <!-- Chat panel -->
+  <div class="cb-panel" id="cb-panel" role="dialog" aria-label="Chat" aria-modal="false">
     <div class="cb-header">
       <h2>Ask Me Anything</h2>
+      <div class="cb-header-actions">
+        <!-- Clear chat -->
+        <button class="cb-icon-btn" id="cb-clear" aria-label="Clear chat" title="Clear chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+          </svg>
+        </button>
+        <!-- Close panel -->
+        <button class="cb-icon-btn" id="cb-close" aria-label="Close chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
     </div>
 
-    <div class="cb-messages" id="cb-messages">
+    <div class="cb-messages" id="cb-messages" aria-live="polite" aria-label="Chat messages">
       <div class="cb-empty" id="cb-empty">Ask a question to get started.</div>
     </div>
 
     <div class="cb-footer">
       <div class="cb-input-row">
-        <input
-          type="text"
+        <textarea
           class="cb-input"
           id="cb-input"
           placeholder="Type your question…"
           autocomplete="off"
           maxlength="2000"
           aria-label="Chat input"
-        >
-        <button class="cb-send" id="cb-send" aria-label="Send">Send</button>
+          rows="1"
+        ></textarea>
+        <button class="cb-send" id="cb-send" aria-label="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
       </div>
     </div>
   </div>
@@ -242,146 +381,195 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
   (function () {
     'use strict';
 
-    var CHAT_API = '/api/rag/chat/';
-    var SESSION_KEY = 'ragChatSessionId';
-    var MAX_SOURCES = 3;
+    const root      = document.getElementById('rag-chatbox-root');
+    const CHAT_API  = root.dataset.apiUrl;
+    const SESSION_KEY = 'ragChatSessionId';
+    const MAX_SOURCES = 3;
 
-    var messages  = document.getElementById('cb-messages');
-    var input     = document.getElementById('cb-input');
-    var sendBtn   = document.getElementById('cb-send');
-    var emptyNote = document.getElementById('cb-empty');
+    const fab       = document.getElementById('cb-fab');
+    const panel     = document.getElementById('cb-panel');
+    const msgList   = document.getElementById('cb-messages');
+    const input     = document.getElementById('cb-input');
+    const sendBtn   = document.getElementById('cb-send');
+    const clearBtn  = document.getElementById('cb-clear');
+    const closeBtn  = document.getElementById('cb-close');
+    let   emptyNote = document.getElementById('cb-empty');
 
-    /* ── CSRF ─────────────────────────────────────────────────────── */
+    let sessionId = sessionStorage.getItem(SESSION_KEY);
+
+    /* ── FAB / panel toggle ─────────────────────────────────────────── */
+    function openPanel() {
+      panel.classList.add('open');
+      fab.setAttribute('aria-expanded', 'true');
+      input.focus();
+    }
+
+    function closePanel() {
+      panel.classList.remove('open');
+      fab.setAttribute('aria-expanded', 'false');
+    }
+
+    fab.addEventListener('click', () =>
+      panel.classList.contains('open') ? closePanel() : openPanel()
+    );
+    closeBtn.addEventListener('click', closePanel);
+
+    /* ── Auto-grow textarea ─────────────────────────────────────────── */
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    });
+
+    /* ── CSRF ───────────────────────────────────────────────────────── */
     function getCsrfToken() {
-      var match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+      const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
       return match ? decodeURIComponent(match[1]) : '';
     }
 
-    /* ── session ──────────────────────────────────────────────────── */
-    var sessionId = sessionStorage.getItem(SESSION_KEY);
-
+    /* ── Session ────────────────────────────────────────────────────── */
     function ensureSession() {
       if (!sessionId) {
-        sessionId = (window.crypto && window.crypto.randomUUID)
-          ? window.crypto.randomUUID()
-          : 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        sessionId = window.crypto?.randomUUID?.()
+          ?? ('sess_' + Date.now() + '_' + Math.random().toString(36).slice(2));
         sessionStorage.setItem(SESSION_KEY, sessionId);
       }
     }
 
-    /* ── safe DOM helpers (no innerHTML with user/API data) ───────── */
+    /* ── Safe DOM helpers (no innerHTML with user/API data) ─────────── */
     function el(tag, cls) {
-      var node = document.createElement(tag);
+      const node = document.createElement(tag);
       if (cls) node.className = cls;
       return node;
     }
 
-    function text(str) {
-      return document.createTextNode(String(str || ''));
-    }
-
-    /**
-     * Validate that a URL is safe to use as an href.
-     * Only http: and https: are allowed; anything else (javascript:, data:, etc.) returns null.
-     */
     function safeHref(raw) {
       if (!raw || typeof raw !== 'string') return null;
       try {
-        var parsed = new URL(raw, window.location.href);
-        return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.href : null;
-      } catch (_) {
-        return null;
-      }
+        const { protocol, href } = new URL(raw, window.location.href);
+        return (protocol === 'http:' || protocol === 'https:') ? href : null;
+      } catch (_) { return null; }
     }
 
-    /* ── append message ───────────────────────────────────────────── */
+    /* ── Typing indicator ───────────────────────────────────────────── */
+    function showTyping() {
+      const wrap = el('div', 'cb-message bot');
+      wrap.id = 'cb-typing-wrap';
+      const dots = el('div', 'cb-typing');
+      dots.setAttribute('aria-label', 'Assistant is typing');
+      dots.innerHTML = '<span></span><span></span><span></span>';
+      wrap.appendChild(dots);
+      msgList.appendChild(wrap);
+      msgList.scrollTop = msgList.scrollHeight;
+    }
+
+    function hideTyping() {
+      document.getElementById('cb-typing-wrap')?.remove();
+    }
+
+    /* ── Append message ─────────────────────────────────────────────── */
     function addMessage(content, role, sources, isError) {
       if (emptyNote) { emptyNote.remove(); emptyNote = null; }
 
-      var wrap   = el('div', 'cb-message ' + role);
-      var bubble = el('div', 'cb-bubble' + (isError ? ' error' : ''));
-      bubble.appendChild(text(content));
+      const wrap   = el('div', 'cb-message ' + role);
+      const bubble = el('div', 'cb-bubble' + (isError ? ' error' : ''));
+      bubble.textContent = content;
       wrap.appendChild(bubble);
 
-      if (role === 'bot' && sources && sources.length) {
-        var srcRow  = el('div', 'cb-sources');
-        srcRow.appendChild(text('Sources: '));
+      if (role === 'bot' && sources?.length) {
+        const srcRow = el('div', 'cb-sources');
+        const label  = el('strong');
+        label.textContent = 'Sources: ';
+        srcRow.appendChild(label);
 
-        var shown = sources.slice(0, MAX_SOURCES);
-        shown.forEach(function (src, i) {
-          var meta  = src.metadata || {};
-          var title = (meta.title || meta.name || ('Source ' + (i + 1))).substring(0, 80);
-          var href  = safeHref(meta.url);
+        sources.slice(0, MAX_SOURCES).forEach((src, i, arr) => {
+          const meta  = src.metadata || {};
+          const title = (meta.title || meta.name || ('Source ' + (i + 1))).substring(0, 80);
+          const href  = safeHref(meta.url);
 
           if (href) {
-            var a = el('a');
+            const a = el('a');
             a.href = href;
             a.target = '_blank';
             a.rel = 'noopener noreferrer';
-            a.appendChild(text(title));
+            a.textContent = title;
             srcRow.appendChild(a);
           } else {
-            var span = el('span');
-            span.appendChild(text(title));
+            const span = el('span');
+            span.textContent = title;
             srcRow.appendChild(span);
           }
 
-          if (i < shown.length - 1) {
-            srcRow.appendChild(text(', '));
-          }
+          if (i < arr.length - 1) srcRow.appendChild(document.createTextNode(', '));
         });
 
         wrap.appendChild(srcRow);
       }
 
-      messages.appendChild(wrap);
-      messages.scrollTop = messages.scrollHeight;
+      msgList.appendChild(wrap);
+      msgList.scrollTop = msgList.scrollHeight;
     }
 
-    /* ── send ─────────────────────────────────────────────────────── */
-    function send() {
-      var q = input.value.trim();
+    /* ── Clear chat ─────────────────────────────────────────────────── */
+    function clearChat() {
+      msgList.innerHTML = '';
+      emptyNote = el('div', 'cb-empty');
+      emptyNote.id = 'cb-empty';
+      emptyNote.textContent = 'Ask a question to get started.';
+      msgList.appendChild(emptyNote);
+      sessionId = null;
+      sessionStorage.removeItem(SESSION_KEY);
+    }
+
+    clearBtn.addEventListener('click', clearChat);
+
+    /* ── Send ───────────────────────────────────────────────────────── */
+    async function send() {
+      const q = input.value.trim();
       if (!q || sendBtn.disabled) return;
 
       ensureSession();
       addMessage(q, 'user');
       input.value = '';
+      input.style.height = 'auto';
       sendBtn.disabled = true;
       sendBtn.innerHTML = '<span class="cb-spinner" aria-hidden="true"></span>';
+      showTyping();
 
-      fetch(CHAT_API, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': getCsrfToken()
-        },
-        body: JSON.stringify({ question: q, session_id: sessionId })
-      })
-      .then(function (res) {
-        return res.json().then(function (data) {
-          return { ok: res.ok, data: data };
+      try {
+        const res = await fetch(CHAT_API, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken(),
+          },
+          body: JSON.stringify({ question: q, session_id: sessionId }),
         });
-      })
-      .then(function (r) {
-        if (!r.ok) throw new Error(r.data.error || 'Server error ' + r.data.status);
-        if (r.data.session_id) {
-          sessionId = r.data.session_id;
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Server error ' + res.status);
+        }
+
+        if (data.session_id) {
+          sessionId = data.session_id;
           sessionStorage.setItem(SESSION_KEY, sessionId);
         }
-        addMessage(r.data.answer || '', 'bot', r.data.sources);
-      })
-      .catch(function (err) {
+
+        addMessage(data.answer || '', 'bot', data.sources);
+
+      } catch (err) {
         addMessage(err.message || 'An error occurred.', 'bot', null, true);
-      })
-      .finally(function () {
+      } finally {
+        hideTyping();
         sendBtn.disabled = false;
-        sendBtn.textContent = 'Send';
+        sendBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
         input.focus();
-      });
+      }
     }
 
     sendBtn.addEventListener('click', send);
-    input.addEventListener('keydown', function (e) {
+    input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
 

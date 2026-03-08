@@ -63,6 +63,7 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
     Response 200: {"answer": "...", "sources": [...], "session_id": "..."}
     Response 400: {"error": "..."}
     Response 413: {"error": "..."}
+    Response 415: {"error": "..."}  POST without Content-Type: application/json
     Response 500: {"error": "..."}
     """
     # Read limits at request time so settings changes take effect without restart.
@@ -90,6 +91,12 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
                     pass  # treat invalid filter as no filter
 
         else:  # POST
+            ct = request.content_type or ""
+            if "application/json" not in ct:
+                return JsonResponse(
+                    {"error": "Content-Type must be application/json."},
+                    status=415,
+                )
             body = request.body
             if len(body) > max_body:
                 return JsonResponse(
