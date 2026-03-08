@@ -10,7 +10,7 @@ from django.apps import apps
 from django.conf import settings
 from wagtail.models import Page
 
-from .api_fields_extractor import page_to_documents_api_extractor
+from .api_fields_extractor import WagtailAPIExtractor, page_to_documents_api_extractor
 from .vector_store import VectorStore
 from wagtail_rag.embeddings import get_embeddings
 from wagtail_rag.conf import conf
@@ -165,7 +165,7 @@ def build_rag_index(
     """
     _write_step_header(stdout, "STEP 1: Loading Configuration")
 
-    raw_names = list(model_names or getattr(settings, "WAGTAIL_RAG_MODELS", None) or [])
+    raw_names = list(model_names or conf.indexing.models.keys() or [])
     model_names = _parse_model_fields_shorthand(raw_names)
     exclude_models = list(
         exclude_models
@@ -251,6 +251,9 @@ def build_rag_index(
                     _write(stdout, "    -> Skipping (up-to-date)")
                     continue
 
+                candidate_fields, field_source = WagtailAPIExtractor._resolve_candidate_fields(page)
+                _write(stdout, f"    Fields ({field_source}): {', '.join(candidate_fields)}")
+
                 docs = page_to_documents_api_extractor(page)
 
                 if not docs:
@@ -259,7 +262,7 @@ def build_rag_index(
 
                 extracted_fields = docs[0].metadata.get("extracted_fields", "title")
                 _write(
-                    stdout, f"    Indexed: {extracted_fields} → {len(docs)} chunk(s)"
+                    stdout, f"    Chunks: {len(docs)} ({extracted_fields})"
                 )
 
                 for doc in docs:

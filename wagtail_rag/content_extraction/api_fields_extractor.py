@@ -1,11 +1,13 @@
 """
 Converts Wagtail pages into LangChain Documents for RAG indexing.
 
-For each page, the extractor:
-  1. Resolves candidate fields (api_fields → settings defaults → auto-scan)
-  2. Extracts and cleans text from each field (StreamField, RichTextField, TextField)
-  3. Chunks large fields with RecursiveCharacterTextSplitter
-  4. Returns Documents with a 'Page / Section' header and rich metadata
+Field resolution per page:
+  1. Explicit list in settings  → ["introduction", "body", "address"]
+  2. "*" in settings            → Wagtail search_fields (text-only, curated)
+
+Each field is chunked independently:
+  - StreamField  → per-block chunking (preserves Wagtail structure)
+  - Other fields → RecursiveCharacterTextSplitter
 """
 
 import logging
@@ -27,47 +29,19 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CHUNK_SIZE = 1000
-DEFAULT_CHUNK_OVERLAP = 200
-DEFAULT_SIZE_THRESHOLD = 2000
+DEFAULT_CHUNK_SIZE = 1500
+DEFAULT_CHUNK_OVERLAP = 100
 MIN_FIELD_LENGTH = 10
-DEFAULT_FIELDS = ["introduction", "body", "content", "backstory"]
 
 # Fields on every Wagtail page that carry no user content.
 _SKIP_FIELDS = {
-    "id",
-    "pk",
-    "path",
-    "depth",
-    "numchild",
-    "url_path",
-    "title",
-    "slug",
-    "draft_title",
-    "content_type",
-    "content_type_id",
-    "live",
-    "has_unpublished_changes",
-    "owner",
-    "locked",
-    "locked_at",
-    "locked_by",
-    "latest_revision",
-    "latest_revision_id",
-    "latest_revision_created_at",
-    "live_revision",
-    "first_published_at",
-    "last_published_at",
-    "go_live_at",
-    "expire_at",
-    "expired",
-    "search_description",
-    "seo_title",
-    "show_in_menus",
-    "translation_key",
-    "locale",
-    "locale_id",
-    "alias_of",
+    "id", "pk", "path", "depth", "numchild", "url_path", "title", "slug",
+    "draft_title", "content_type", "content_type_id", "live",
+    "has_unpublished_changes", "owner", "locked", "locked_at", "locked_by",
+    "latest_revision", "latest_revision_id", "latest_revision_created_at",
+    "live_revision", "first_published_at", "last_published_at", "go_live_at",
+    "expire_at", "expired", "search_description", "seo_title", "show_in_menus",
+    "translation_key", "locale", "locale_id", "alias_of",
 }
 
 
@@ -78,16 +52,12 @@ class WagtailAPIExtractor:
         self,
         chunk_size: Optional[int] = None,
         chunk_overlap: Optional[int] = None,
-        size_threshold: Optional[int] = None,
     ):
         self.chunk_size = chunk_size or getattr(
             settings, "WAGTAIL_RAG_CHUNK_SIZE", DEFAULT_CHUNK_SIZE
         )
         self.chunk_overlap = chunk_overlap or getattr(
             settings, "WAGTAIL_RAG_CHUNK_OVERLAP", DEFAULT_CHUNK_OVERLAP
-        )
-        self.size_threshold = size_threshold or getattr(
-            settings, "WAGTAIL_RAG_SIZE_THRESHOLD", DEFAULT_SIZE_THRESHOLD
         )
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
@@ -100,72 +70,42 @@ class WagtailAPIExtractor:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    def _scan_content_fields(page, require_content: bool = False) -> List[str]:
-        """Return content field names on a page, optionally skipping empty ones.
+    def _scan_search_fields(page) -> List[str]:
+        """Return field names from Wagtail's search_fields (SearchField only).
 
-        Args:
-            require_content: When True, only include fields that have a value.
+        Only SearchField instances are included; FilterField, AutocompleteField,
+        and RelatedFields are ignored.
         """
-        from django.db.models import ForeignKey, ManyToManyField, TextField
-        from wagtail.fields import RichTextField, StreamField
-
-        fields = []
         try:
-            for field in page._meta.get_fields():
-                name = getattr(field, "name", None)
-                if not name or name.startswith("_") or name in _SKIP_FIELDS:
-                    continue
-                if isinstance(field, (ForeignKey, ManyToManyField)):
-                    continue
-                if isinstance(field, (StreamField, RichTextField, TextField)):
-                    if require_content and not getattr(page, name, None):
-                        continue
-                    fields.append(name)
+            from wagtail.search.index import SearchField as WagtailSearchField
+            return [
+                sf.field_name
+                for sf in getattr(page, "search_fields", [])
+                if isinstance(sf, WagtailSearchField)
+                and sf.field_name not in _SKIP_FIELDS
+                and getattr(page, sf.field_name, None)
+            ]
         except Exception as exc:
             logger.debug(
-                "Error scanning fields for %s: %s", page.__class__.__name__, exc
+                "Error scanning search_fields for %s: %s", page.__class__.__name__, exc
             )
-        return fields
+            return []
 
     @staticmethod
     def _resolve_candidate_fields(page) -> tuple[List[str], str]:
-        """Resolve fields to extract, in priority order:
+        """Resolve fields to extract:
 
-        1. page.api_fields (Wagtail declared API fields)
-        2. WAGTAIL_RAG_DEFAULT_FIELDS setting (or built-in defaults)
-        3. Auto-scan — when no default fields exist on the model
+        - explicit list in settings → use those fields
+        - "*" in settings           → use Wagtail search_fields
         """
-        if hasattr(page, "api_fields"):
-            names = [f.name for f in page.api_fields if hasattr(f, "name")]
-            if names:
-                logger.debug(
-                    "Using api_fields from %s: %s",
-                    page.__class__.__name__,
-                    ", ".join(names),
-                )
-                return names, f"model api_fields: {', '.join(names)}"
+        from wagtail_rag.conf import conf
 
-        defaults = getattr(settings, "WAGTAIL_RAG_DEFAULT_FIELDS", DEFAULT_FIELDS)
-        if any(hasattr(page, f) for f in defaults):
-            logger.debug(
-                "Using default fields for %s: %s",
-                page.__class__.__name__,
-                ", ".join(defaults),
-            )
-            return list(defaults), "default fields"
+        from_settings = conf.indexing.fields_for(page)
+        if from_settings:
+            return from_settings, f"settings: {', '.join(from_settings)}"
 
-        discovered = WagtailAPIExtractor._scan_content_fields(
-            page, require_content=True
-        )
-        if discovered:
-            logger.debug(
-                "Auto-discovered fields for %s: %s",
-                page.__class__.__name__,
-                ", ".join(discovered),
-            )
-            return discovered, f"auto-discovered: {', '.join(discovered)}"
-
-        return list(defaults), "default fields (fallback)"
+        search_fields = WagtailAPIExtractor._scan_search_fields(page)
+        return search_fields, f"search_fields: {', '.join(search_fields)}"
 
     # -------------------------------------------------------------------------
     # Text cleaning
@@ -173,22 +113,14 @@ class WagtailAPIExtractor:
 
     @staticmethod
     def _clean_text(text) -> str:
-        """Strip HTML and collapse all whitespace to single spaces.
-
-        Use for individual block values where paragraph structure is not meaningful.
-        Use _clean_field_text() for multi-paragraph field content.
-        """
+        """Strip HTML and collapse whitespace."""
         if not text:
             return ""
         return " ".join(strip_tags(str(text)).split()).strip()
 
     @staticmethod
     def _clean_field_text(text) -> str:
-        """Strip HTML while preserving paragraph breaks for the text splitter.
-
-        Converts block-level HTML elements (<p>, <br>, <li>, headings) to
-        newlines before stripping tags so sentences don't run together.
-        """
+        """Strip HTML while preserving paragraph breaks for the text splitter."""
         if not text:
             return ""
         text = str(text)
@@ -201,7 +133,7 @@ class WagtailAPIExtractor:
         return "\n\n".join(" ".join(p.split()) for p in paragraphs if p.strip())
 
     # -------------------------------------------------------------------------
-    # StreamField extraction
+    # StreamField block extraction
     # -------------------------------------------------------------------------
 
     def _extract_from_dict(self, data: dict) -> str:
@@ -221,8 +153,7 @@ class WagtailAPIExtractor:
         return " ".join(parts)
 
     def _extract_from_block(self, block) -> Optional[str]:
-        """Extract text from a StreamField block, trying multiple strategies."""
-        # 1. Rendered HTML (most complete)
+        """Extract text from a single StreamField block."""
         try:
             text = self._clean_text(block.render_as_block())
             if text:
@@ -232,78 +163,104 @@ class WagtailAPIExtractor:
 
         value = block.value
 
-        # 2. RichText block
         if hasattr(value, "source"):
-            text = self._clean_text(value.source)
-            if text:
-                return text
-
-        # 3. Structured / dict block
+            return self._clean_text(value.source) or None
         if isinstance(value, dict):
-            text = self._extract_from_dict(value)
-            if text:
-                return text
-
-        # 4. Plain string
+            return self._extract_from_dict(value) or None
         if isinstance(value, str):
-            text = self._clean_text(value)
-            if text:
-                return text
-
-        # 5. List block
+            return self._clean_text(value) or None
         if isinstance(value, list):
-            text = self._extract_from_list(value)
-            if text:
-                return text
+            return self._extract_from_list(value) or None
 
-        # 6. Last resort — skip if it looks like a model repr (e.g. "App.Model.None")
         text = str(value)
         if text.endswith("None") and "." in text:
             return None
         return self._clean_text(text) or None
 
+    def _chunk_streamfield(
+        self, page, field_name: str, base_metadata: dict, title: str
+    ) -> List[Document]:
+        """Chunk a StreamField per-block so chunks never span unrelated blocks."""
+        value = getattr(page, field_name, None)
+        if not value:
+            return []
+
+        header = f"Page: {title}\nSection: {field_name}\n\n"
+        documents: List[Document] = []
+        chunk_index = 0
+
+        for block in value:
+            try:
+                block_text = self._extract_from_block(block)
+            except Exception as exc:
+                logger.warning("Block extraction failed for '%s': %s", field_name, exc)
+                continue
+
+            if not block_text or len(block_text.strip()) <= MIN_FIELD_LENGTH:
+                continue
+
+            block_type = getattr(block, "block_type", "block")
+            block_meta = {**base_metadata, "section": field_name, "block_type": block_type}
+
+            chunks = self.text_splitter.split_text(block_text)
+            for i, chunk in enumerate(chunks):
+                documents.append(
+                    Document(
+                        page_content=f"{header}{chunk}",
+                        metadata={
+                            **block_meta,
+                            "chunk_index": chunk_index,
+                            "block_chunk_index": i,
+                            "total_block_chunks": len(chunks),
+                            "content_length": len(chunk),
+                        },
+                    )
+                )
+                chunk_index += 1
+
+        return documents
+
     # -------------------------------------------------------------------------
-    # Field-level extraction
+    # Plain field extraction
     # -------------------------------------------------------------------------
 
     def _extract_field_value(self, page, field_name: str) -> Optional[str]:
-        """Extract cleaned text from a single page field."""
+        """Extract cleaned text from a non-StreamField page field."""
         try:
             value = getattr(page, field_name, None)
             if value is None:
                 return None
-
-            # StreamField
-            if hasattr(value, "__iter__") and hasattr(value, "stream_block"):
-                parts = []
-                for block in value:
-                    try:
-                        text = self._extract_from_block(block)
-                        if text:
-                            parts.append(text)
-                    except Exception as exc:
-                        logger.warning(
-                            "Block extraction failed for '%s': %s", field_name, exc
-                        )
-                return "\n\n".join(parts) or None
-
-            # RichTextField
             if hasattr(value, "source"):
                 return self._clean_field_text(value.source)
-
-            # Plain text
             if isinstance(value, str):
                 return self._clean_field_text(value)
-
-            # Other types — skip model reprs like "app.Model.None"
             text = str(value)
             if not text or (text.endswith("None") and "." in text):
                 return None
             return self._clean_text(text)
-
         except Exception as exc:
             logger.error("Error extracting field '%s': %s", field_name, exc)
             return None
+
+    def _chunk_plain_field(
+        self, text: str, field_name: str, base_metadata: dict, title: str
+    ) -> List[Document]:
+        """Chunk a plain text / RichTextField field."""
+        header = f"Page: {title}\nSection: {field_name}\n\n"
+        chunks = self.text_splitter.split_text(text)
+        return [
+            Document(
+                page_content=f"{header}{chunk}",
+                metadata={
+                    **base_metadata,
+                    "section": field_name,
+                    "chunk_index": i,
+                    "total_chunks": len(chunks),
+                    "content_length": len(chunk),
+                },
+            )
+            for i, chunk in enumerate(chunks)
+        ]
 
     # -------------------------------------------------------------------------
     # Page extraction
@@ -331,21 +288,21 @@ class WagtailAPIExtractor:
             metadata["last_published_at"] = page.last_published_at.isoformat()
         return metadata
 
+    @staticmethod
+    def _is_streamfield(page, field_name: str) -> bool:
+        try:
+            from wagtail.fields import StreamField
+            field = page._meta.get_field(field_name)
+            return isinstance(field, StreamField)
+        except Exception:
+            return False
+
     def extract_page(self, page) -> List[Document]:
         """Extract and chunk all content fields from a Wagtail page.
 
-        Each field is chunked independently — chunks never span fields,
-        ensuring section metadata is accurate and the LLM knows the source.
+        Always includes a title document. StreamField fields are chunked
+        per-block; other fields use RecursiveCharacterTextSplitter.
         """
-        if logger.isEnabledFor(logging.DEBUG):
-            available = self._scan_content_fields(page)
-            if available:
-                logger.debug(
-                    "Content fields on %s: %s",
-                    page.__class__.__name__,
-                    ", ".join(available),
-                )
-
         candidate_fields, field_source = self._resolve_candidate_fields(page)
         base_metadata = self._build_metadata(page)
         base_metadata["field_source"] = field_source
@@ -354,53 +311,36 @@ class WagtailAPIExtractor:
         documents: List[Document] = []
         extracted_fields: List[str] = []
 
-        for field_name in candidate_fields:
-            text = self._extract_field_value(page, field_name)
-            if not text or len(text.strip()) <= MIN_FIELD_LENGTH:
-                continue
-
-            extracted_fields.append(field_name)
-            header = f"Page: {title}\nSection: {field_name}\n\n"
-
-            if len(text) + len(header) <= self.size_threshold:
-                documents.append(
-                    Document(
-                        page_content=f"{header}{text}",
-                        metadata={
-                            **base_metadata,
-                            "section": field_name,
-                            "chunk_index": 0,
-                            "total_chunks": 1,
-                            "content_length": len(text),
-                        },
-                    )
-                )
-            else:
-                chunks = self.text_splitter.split_text(text)
-                logger.debug(
-                    "Page '%s' field '%s': %d chunk(s)", title, field_name, len(chunks)
-                )
-                for i, chunk in enumerate(chunks):
-                    documents.append(
-                        Document(
-                            page_content=f"{header}{chunk}",
-                            metadata={
-                                **base_metadata,
-                                "section": field_name,
-                                "chunk_index": i,
-                                "total_chunks": len(chunks),
-                                "content_length": len(chunk),
-                            },
-                        )
-                    )
-
-        if not documents:
-            logger.warning(
-                "No content extracted from %s (ID: %s)",
-                page.__class__.__name__,
-                page.id,
+        documents.append(
+            Document(
+                page_content=f"Page: {title}\nSection: title\n\n{title}",
+                metadata={
+                    **base_metadata,
+                    "section": "title",
+                    "chunk_index": 0,
+                    "total_chunks": 1,
+                    "content_length": len(title),
+                },
             )
-            return []
+        )
+
+        for field_name in candidate_fields:
+            if self._is_streamfield(page, field_name):
+                field_docs = self._chunk_streamfield(page, field_name, base_metadata, title)
+            else:
+                text = self._extract_field_value(page, field_name)
+                if not text or len(text.strip()) <= MIN_FIELD_LENGTH:
+                    continue
+                field_docs = self._chunk_plain_field(text, field_name, base_metadata, title)
+
+            if field_docs:
+                extracted_fields.append(field_name)
+                documents.extend(field_docs)
+
+        if len(documents) == 1:
+            logger.warning(
+                "No content extracted from %s (ID: %s)", page.__class__.__name__, page.id
+            )
 
         extracted_fields_str = ", ".join(["title"] + extracted_fields)
         for doc in documents:
@@ -408,10 +348,7 @@ class WagtailAPIExtractor:
 
         logger.debug(
             "Page '%s' (ID: %s): %d field(s), %d document(s)",
-            title,
-            page.id,
-            len(extracted_fields),
-            len(documents),
+            title, page.id, len(extracted_fields), len(documents),
         )
         return documents
 

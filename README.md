@@ -137,14 +137,14 @@ All RAG operations go through a single command: `manage.py rag <subcommand>`.
 
 ```bash
 python manage.py rag index                  # full index build
-python manage.py rag index --reset-only     # wipe collection only
+python manage.py rag index --clear     # wipe collection only
 python manage.py rag index --page-id 42     # re-index one page
 ```
 
 If you change embedding models, always reset first:
 
 ```bash
-python manage.py rag index --reset-only
+python manage.py rag index --clear
 python manage.py rag index
 ```
 
@@ -190,7 +190,7 @@ make install-openai  # pip install -e ".[openai,test,dev]"
 make install-all     # pip install -e ".[all,test,dev]"
 
 make index           # rag index
-make index-reset     # rag index --reset-only
+make index-reset     # rag index --clear
 make index-rebuild   # reset then index
 make chat            # rag chat
 make test-rag        # rag test (full pipeline)
@@ -224,6 +224,15 @@ WAGTAIL_RAG = {
         "collection": "wagtail_rag",
         # "connection_string": "postgresql+psycopg2://..."  # pgvector only
     },
+    "indexing": {
+        # key   = model to index
+        # value = "*" (auto-discover all fields) or ["f1", "f2"] (explicit fields)
+        "models": {
+            "locations.LocationPage": ["introduction", "body", "address", "lat_long"],
+            "breads.BreadPage": "*",
+            "blog.BlogPage":    "*",
+        },
+    },
 }
 ```
 
@@ -237,14 +246,13 @@ WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION = False  # MultiQueryRetriever query expansi
 
 ### Indexing
 
+Models to index are defined by `indexing.models` inside `WAGTAIL_RAG`.
+The flat `WAGTAIL_RAG_MODELS` setting is still accepted as a fallback when `indexing.models` is not set.
+
 ```python
-WAGTAIL_RAG_MODELS = [
-    "blog.BlogPage",
-    "breads.BreadPage:*",   # :* = index all content fields on this model
-]
 WAGTAIL_RAG_EXCLUDE_MODELS = ["wagtailcore.Page"]
-WAGTAIL_RAG_CHUNK_SIZE      = 1000
-WAGTAIL_RAG_CHUNK_OVERLAP   = 200
+WAGTAIL_RAG_CHUNK_SIZE      = 1500
+WAGTAIL_RAG_CHUNK_OVERLAP   = 100
 WAGTAIL_RAG_SKIP_IF_INDEXED = True  # skip unchanged pages on re-index
 WAGTAIL_RAG_PRUNE_DELETED   = True  # remove stale chunks for deleted pages
 ```

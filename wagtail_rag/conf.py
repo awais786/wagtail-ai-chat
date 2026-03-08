@@ -1,16 +1,14 @@
 """
 Centralised settings access for Wagtail RAG.
 
-Preferred configuration uses a single grouped dict:
-
     WAGTAIL_RAG = {
         "embedding": {
-            "provider": "openai",
-            "model": "text-embedding-3-small",
+            "provider": "openai",           # "openai" | "sentence-transformers" | "huggingface"
+            "model":    "text-embedding-3-small",
         },
         "llm": {
-            "provider": "openai",
-            "model": "gpt-4o",
+            "provider": "openai",           # "openai" | "ollama" | "anthropic"
+            "model":    "gpt-4o",
         },
         "vector_store": {
             "backend":    "faiss",          # "faiss" | "chroma" | "pgvector"
@@ -18,16 +16,16 @@ Preferred configuration uses a single grouped dict:
             "collection": "wagtail_rag",
             # "connection_string": "postgresql+psycopg2://..."  # pgvector only
         },
+        "indexing": {
+            "models": {
+                # ["f1", "f2"] → use exactly these fields
+                # "*"          → use Wagtail search_fields automatically
+                "locations.LocationPage": ["introduction", "body", "address"],
+                "breads.BreadPage":       "*",
+                "blog.BlogPage":          "*",
+            },
+        },
     }
-
-Flat legacy settings (WAGTAIL_RAG_VECTOR_STORE_BACKEND, WAGTAIL_RAG_MODEL_NAME, …)
-are still supported as fallbacks.
-
-Import and use:
-    from wagtail_rag.conf import conf
-    conf.embedding.provider      # → "openai"
-    conf.llm.model               # → "gpt-4o"
-    conf.vector_store.backend    # → "faiss"
 """
 
 from django.conf import settings as django_settings
@@ -38,8 +36,6 @@ def _root() -> dict:
 
 
 class _EmbeddingConf:
-    """Accessor for WAGTAIL_RAG['embedding'] settings."""
-
     def _group(self) -> dict:
         return _root().get("embedding") or {}
 
@@ -57,8 +53,6 @@ class _EmbeddingConf:
 
 
 class _LLMConf:
-    """Accessor for WAGTAIL_RAG['llm'] settings."""
-
     def _group(self) -> dict:
         return _root().get("llm") or {}
 
@@ -76,8 +70,6 @@ class _LLMConf:
 
 
 class _VectorStoreConf:
-    """Accessor for WAGTAIL_RAG['vector_store'] settings."""
-
     def _group(self) -> dict:
         return _root().get("vector_store") or {}
 
@@ -90,7 +82,6 @@ class _VectorStoreConf:
     @property
     def path(self) -> str:
         import os
-
         return (
             self._group().get("path")
             or getattr(django_settings, "WAGTAIL_RAG_CHROMA_PATH", None)
@@ -110,10 +101,34 @@ class _VectorStoreConf:
         )
 
 
+class _IndexingConf:
+    def _group(self) -> dict:
+        return _root().get("indexing") or {}
+
+    @property
+    def models(self) -> dict:
+        """Return {model_name: fields} dict.
+
+        Falls back to flat WAGTAIL_RAG_MODELS list (all models get "*").
+        """
+        from_group = self._group().get("models")
+        if isinstance(from_group, dict):
+            return from_group
+        flat = list(getattr(django_settings, "WAGTAIL_RAG_MODELS", None) or [])
+        return {name: "*" for name in flat}
+
+    def fields_for(self, model) -> list:
+        """Return explicit field list for this model, or [] to use search_fields."""
+        model_name = f"{model._meta.app_label}.{model.__class__.__name__}"
+        v = self.models.get(model_name) or self.models.get(model.__class__.__name__)
+        return v if isinstance(v, list) else []
+
+
 class _Conf:
-    embedding = _EmbeddingConf()
-    llm = _LLMConf()
+    embedding    = _EmbeddingConf()
+    llm          = _LLMConf()
     vector_store = _VectorStoreConf()
+    indexing     = _IndexingConf()
 
 
 conf = _Conf()

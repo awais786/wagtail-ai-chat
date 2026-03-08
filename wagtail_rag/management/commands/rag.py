@@ -8,7 +8,7 @@ Subcommands:
 
 Examples:
   python manage.py rag index
-  python manage.py rag index --reset-only
+  python manage.py rag index --clear
   python manage.py rag index --page-id 42
   python manage.py rag chat
   python manage.py rag chat -q "What is sourdough bread?"
@@ -52,9 +52,9 @@ class Command(BaseCommand):
             "index", help="Build / reset the vector-store index"
         )
         index_parser.add_argument(
-            "--reset-only",
+            "--clear",
             action="store_true",
-            help="Clear the collection without re-indexing",
+            help="Delete all vectors from the collection without re-indexing",
         )
         index_parser.add_argument(
             "--page-id",
@@ -163,7 +163,7 @@ class Command(BaseCommand):
 
         build_rag_index(
             model_names=model_names,
-            reset_only=options["reset_only"],
+            reset_only=options["clear"],
             page_id=options["page_id"],
             stdout=self.stdout.write,
         )
