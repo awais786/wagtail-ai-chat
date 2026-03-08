@@ -138,10 +138,13 @@ class RAGChatBot:
         return base_retriever
 
     def _format_sources(self, docs) -> list[dict]:
-        """Return one source entry per unique page (deduplicated by page_id)."""
+        """Return unique source pages, limited to the top MAX_SOURCES by retrieval rank."""
+        MAX_SOURCES = int(getattr(settings, "WAGTAIL_RAG_MAX_SOURCES", 3))
         seen = set()
         sources = []
         for doc in docs:
+            if len(sources) >= MAX_SOURCES:
+                break
             page_id = doc.metadata.get("page_id") or doc.metadata.get("title")
             if page_id in seen:
                 continue
