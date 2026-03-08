@@ -206,7 +206,12 @@ class LLMProviderFactory:
         return True
 
     def _resolve_setting_model_name(self, provider: str) -> Optional[str]:
-        """Resolve provider-specific model setting first, then the global setting."""
+        """Resolve model name from grouped setting, provider-specific setting, then global setting."""
+        # Grouped setting takes priority
+        group = (getattr(self.settings, "WAGTAIL_RAG", {}) or {}).get("llm") or {}
+        if group.get("model"):
+            return group["model"]
+
         provider_setting_keys: dict[str, str] = {
             "openai": "WAGTAIL_RAG_OPENAI_MODEL_NAME",
             "anthropic": "WAGTAIL_RAG_ANTHROPIC_MODEL_NAME",
@@ -258,9 +263,12 @@ class LLMProviderFactory:
             model_name: Optional model name (required for most providers)
             **kwargs: Provider-specific arguments
         """
-        provider_key = (
-            provider or getattr(self.settings, "WAGTAIL_RAG_LLM_PROVIDER", "ollama")
-        ).lower()
+        group = (getattr(self.settings, "WAGTAIL_RAG", {}) or {}).get("llm") or {}
+        default_provider = (
+            group.get("provider")
+            or getattr(self.settings, "WAGTAIL_RAG_LLM_PROVIDER", "ollama")
+        )
+        provider_key = (provider or default_provider).lower()
         resolved_model = self._resolve_model_name(provider_key, model_name)
         logger.info(
             "Initializing LLM: provider='%s', model='%s'", provider_key, resolved_model

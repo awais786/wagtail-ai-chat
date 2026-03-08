@@ -173,7 +173,12 @@ class EmbeddingProviderFactory:
         return True
 
     def _resolve_setting_model_name(self, provider: str) -> Optional[str]:
-        """Resolve model name from a provider-specific setting, then the global setting."""
+        """Resolve model name from grouped setting, provider-specific setting, then global setting."""
+        # Grouped setting takes priority
+        group = (getattr(self.settings, "WAGTAIL_RAG", {}) or {}).get("embedding") or {}
+        if group.get("model"):
+            return group["model"]
+
         provider_setting_keys: dict[str, str] = {
             "openai": "WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL",
             "ollama": "WAGTAIL_RAG_OLLAMA_EMBEDDING_MODEL",
@@ -230,9 +235,12 @@ class EmbeddingProviderFactory:
             model_name: Optional model name (most providers require this)
             **kwargs: Provider-specific arguments
         """
-        provider_key = (
-            provider or getattr(self.settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface")
-        ).lower()
+        group = (getattr(self.settings, "WAGTAIL_RAG", {}) or {}).get("embedding") or {}
+        default_provider = (
+            group.get("provider")
+            or getattr(self.settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface")
+        )
+        provider_key = (provider or default_provider).lower()
         resolved_model = self._resolve_model_name(provider_key, model_name)
         logger.info(
             "Initializing embeddings: provider='%s', model='%s'", provider_key, resolved_model

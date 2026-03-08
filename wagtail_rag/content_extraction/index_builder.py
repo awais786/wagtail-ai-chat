@@ -14,6 +14,7 @@ from wagtail.models import Page
 from .api_fields_extractor import page_to_documents_api_extractor
 from .vector_store import VectorStore
 from wagtail_rag.embeddings import get_embeddings
+from wagtail_rag.conf import conf
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +191,8 @@ def build_rag_index(
 
     _write(stdout, "\nInitializing embeddings...")
     embeddings = get_embeddings(
-        provider=getattr(settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface"),
-        model_name=getattr(settings, "WAGTAIL_RAG_EMBEDDING_MODEL", None),
+        provider=conf.embedding.provider,
+        model_name=conf.embedding.model,
     )
     _write(stdout, "Embeddings loaded")
 

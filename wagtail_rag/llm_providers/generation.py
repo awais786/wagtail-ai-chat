@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from django.conf import settings
 
-from wagtail_rag.chat_history import get_history_store
+from .chat_history import get_history_store
 
 logger = logging.getLogger(__name__)
 
@@ -67,34 +67,31 @@ class LLMGenerator:
         self.history_chain = self._create_history_chain()
 
     def _get_prompt_template(self) -> str:
-        return getattr(
-            settings,
-            "WAGTAIL_RAG_PROMPT_TEMPLATE",
-            """You are an expert assistant helping users find information from website content. Analyze the provided context carefully and provide accurate, helpful answers.
-
-**Guidelines:**
-1. Use ONLY information from the context provided below
-2. When citing information, reference the source page title or section
-3. For structured content (like FAQ sections, numbered lists, or procedures), maintain the original organization
-4. If content has sections or categories, organize your response accordingly
-5. If you cannot find relevant information in the context, clearly state: "I don't have enough information in the available content to answer that question."
-6. For multi-part questions, address each part systematically
-7. Preserve important formatting like bullet points, numbers, or hierarchical structure when relevant
-
-**Context:**
-{context}
-
-**Question:**
-{question}
-
-**Answer:**""",
+        return (
+            "You are an expert assistant helping users find information from website content. "
+            "Analyze the provided context carefully and provide accurate, helpful answers.\n\n"
+            "**Guidelines:**\n"
+            "1. Use ONLY information from the context provided below\n"
+            "2. When citing information, reference the source page title or section\n"
+            "3. For structured content (like FAQ sections, numbered lists, or procedures), "
+            "maintain the original organization\n"
+            "4. If content has sections or categories, organize your response accordingly\n"
+            "5. If you cannot find relevant information in the context, clearly state: "
+            '"I don\'t have enough information in the available content to answer that question."\n'
+            "6. For multi-part questions, address each part systematically\n"
+            "7. Preserve important formatting like bullet points, numbers, or hierarchical "
+            "structure when relevant\n\n"
+            "**Context:**\n{context}\n\n"
+            "**Question:**\n{question}\n\n"
+            "**Answer:**"
         )
 
     def _get_system_prompt(self) -> str:
-        return getattr(
-            settings,
-            "WAGTAIL_RAG_SYSTEM_PROMPT",
-            """You are a knowledgeable assistant for a website. Answer questions using ONLY the provided context. Maintain the structure and organization of the source content when relevant. Always cite sources and clearly state if information is not available.""",
+        return (
+            "You are a knowledgeable assistant for a website. "
+            "Answer questions using ONLY the provided context. "
+            "Maintain the structure and organization of the source content when relevant. "
+            "Always cite sources and clearly state if information is not available."
         )
 
     def _create_qa_chain(self) -> Optional[Any]:

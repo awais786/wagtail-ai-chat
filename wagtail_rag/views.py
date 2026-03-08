@@ -13,7 +13,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
-from .rag_chatbot import get_chatbot
+from .chatbot import get_chatbot
 
 logger = logging.getLogger(__name__)
 

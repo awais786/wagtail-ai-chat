@@ -79,10 +79,16 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 WAGTAIL_SITE_NAME = "Test Site"
 
 # Wagtail RAG settings (test configuration)
-WAGTAIL_RAG_LLM_PROVIDER = "ollama"
-WAGTAIL_RAG_MODEL_NAME = "llama2"
-WAGTAIL_RAG_EMBEDDING_PROVIDER = "sentence-transformers"
-WAGTAIL_RAG_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+WAGTAIL_RAG = {
+    "llm": {
+        "provider": "ollama",
+        "model": "llama2",
+    },
+    "embedding": {
+        "provider": "sentence-transformers",
+        "model": "all-MiniLM-L6-v2",
+    },
+}
 WAGTAIL_RAG_VECTOR_STORE = "faiss"
 WAGTAIL_RAG_FAISS_INDEX_PATH = os.path.join(BASE_DIR, "test_faiss_index")
 WAGTAIL_RAG_CHUNK_SIZE = 500

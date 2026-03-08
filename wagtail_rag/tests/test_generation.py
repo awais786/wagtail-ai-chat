@@ -54,7 +54,7 @@ class TestLLMGenerator(unittest.TestCase):
         self.assertEqual(LLMGenerator._extract_text_from_result(123), "123")
 
     def test_prompt_templates(self):
-        """Test default and custom prompt templates."""
+        """Test default prompt and system prompt templates."""
         mock_llm = MagicMock()
         generator = LLMGenerator(llm=mock_llm, retriever=None)
 
@@ -63,17 +63,8 @@ class TestLLMGenerator(unittest.TestCase):
         self.assertIn("{question}", generator.prompt_template_str)
         self.assertIsNotNone(generator.system_prompt_str)
 
-        # Custom templates
-        with patch("wagtail_rag.llm_providers.generation.settings") as mock_settings:
-            mock_settings.WAGTAIL_RAG_PROMPT_TEMPLATE = "Custom: {context} {question}"
-            mock_settings.WAGTAIL_RAG_SYSTEM_PROMPT = "Custom system prompt"
-            mock_settings.WAGTAIL_RAG_ENABLE_CHAT_HISTORY = False
-
-            generator = LLMGenerator(llm=mock_llm, retriever=None)
-            self.assertEqual(
-                generator.prompt_template_str, "Custom: {context} {question}"
-            )
-            self.assertEqual(generator.system_prompt_str, "Custom system prompt")
+        # Prompts are fixed (not user-overridable)
+        self.assertIsNotNone(generator.system_prompt_str)
 
 
 if __name__ == "__main__":
