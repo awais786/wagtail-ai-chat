@@ -11,7 +11,7 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
     #rag-chatbox-root { --cb-primary: #your-brand-color; }
 {% endcomment %}
 
-<div id="rag-chatbox-root" data-api-url="{% url 'rag_chat_api' %}">
+<div id="rag-chatbox-root" data-api-url="{% url 'wagtail_rag:rag_chat_api' %}">
   <style>
     /* Scoped to #rag-chatbox-root — does not affect the host page */
     #rag-chatbox-root {
