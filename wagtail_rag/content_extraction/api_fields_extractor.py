@@ -35,16 +35,39 @@ DEFAULT_FIELDS = ["introduction", "body", "content", "backstory"]
 
 # Fields on every Wagtail page that carry no user content.
 _SKIP_FIELDS = {
-    "id", "pk", "path", "depth", "numchild", "url_path",
-    "title", "slug", "draft_title",
-    "content_type", "content_type_id",
-    "live", "has_unpublished_changes",
-    "owner", "locked", "locked_at", "locked_by",
-    "latest_revision", "latest_revision_id", "latest_revision_created_at",
+    "id",
+    "pk",
+    "path",
+    "depth",
+    "numchild",
+    "url_path",
+    "title",
+    "slug",
+    "draft_title",
+    "content_type",
+    "content_type_id",
+    "live",
+    "has_unpublished_changes",
+    "owner",
+    "locked",
+    "locked_at",
+    "locked_by",
+    "latest_revision",
+    "latest_revision_id",
+    "latest_revision_created_at",
     "live_revision",
-    "first_published_at", "last_published_at", "go_live_at", "expire_at", "expired",
-    "search_description", "seo_title", "show_in_menus",
-    "translation_key", "locale", "locale_id", "alias_of",
+    "first_published_at",
+    "last_published_at",
+    "go_live_at",
+    "expire_at",
+    "expired",
+    "search_description",
+    "seo_title",
+    "show_in_menus",
+    "translation_key",
+    "locale",
+    "locale_id",
+    "alias_of",
 }
 
 
@@ -131,7 +154,9 @@ class WagtailAPIExtractor:
             )
             return list(defaults), "default fields"
 
-        discovered = WagtailAPIExtractor._scan_content_fields(page, require_content=True)
+        discovered = WagtailAPIExtractor._scan_content_fields(
+            page, require_content=True
+        )
         if discovered:
             logger.debug(
                 "Auto-discovered fields for %s: %s",

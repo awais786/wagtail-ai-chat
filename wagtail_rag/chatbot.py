@@ -9,16 +9,17 @@ Flow for each query:
 """
 
 import logging
-import os
 
 from django.conf import settings
 
 try:
     from langchain.retrievers.multi_query import MultiQueryRetriever
+
     MULTI_QUERY_AVAILABLE = True
 except ImportError:
     try:
         from langchain_community.retrievers import MultiQueryRetriever
+
         MULTI_QUERY_AVAILABLE = True
     except ImportError:
         MULTI_QUERY_AVAILABLE = False
@@ -26,7 +27,9 @@ except ImportError:
 
 from .llm_providers import get_llm, LLMGenerator
 from .embeddings import get_embeddings, EmbeddingSearcher
-from .llm_providers.generation import LCEL_AVAILABLE as USE_LCEL  # noqa: F401 – re-exported
+from .llm_providers.generation import (
+    LCEL_AVAILABLE as USE_LCEL,
+)  # noqa: F401 – re-exported
 from .conf import conf
 
 logger = logging.getLogger(__name__)
@@ -35,6 +38,7 @@ logger = logging.getLogger(__name__)
 def _is_wagtail_available() -> bool:
     try:
         from wagtail.models import Page  # noqa: F401
+
         return True
     except Exception:
         return False
@@ -52,12 +56,8 @@ class RAGChatBot:
         llm_provider=None,
         llm_kwargs=None,
     ):
-        self.collection_name = collection_name or getattr(
-            settings, "WAGTAIL_RAG_COLLECTION_NAME", "wagtail_rag"
-        )
-        self.persist_directory = persist_directory or getattr(
-            settings, "WAGTAIL_RAG_CHROMA_PATH", os.path.join(settings.BASE_DIR, "chroma_db")
-        )
+        self.collection_name = collection_name or conf.vector_store.collection
+        self.persist_directory = persist_directory or conf.vector_store.path
         self.llm_provider = llm_provider or conf.llm.provider
         self.model_name = model_name or conf.llm.model
         self.metadata_filter = metadata_filter or {}
@@ -75,7 +75,9 @@ class RAGChatBot:
             self.collection_name,
         )
 
-        self.embeddings = get_embeddings(provider=embedding_provider, model_name=embedding_model)
+        self.embeddings = get_embeddings(
+            provider=embedding_provider, model_name=embedding_model
+        )
         self.vectorstore = self._create_vectorstore()
         self.llm = get_llm(
             provider=self.llm_provider, model_name=self.model_name, **(llm_kwargs or {})
@@ -142,7 +144,11 @@ class RAGChatBot:
         ]
 
     def query(
-        self, question: str, boost_title_matches: bool = True, session_id=None, search_only: bool = False
+        self,
+        question: str,
+        boost_title_matches: bool = True,
+        session_id=None,
+        search_only: bool = False,
     ) -> dict:
         """Query the RAG chatbot.
 
@@ -164,7 +170,9 @@ class RAGChatBot:
         if search_only:
             return {"answer": None, "sources": self._format_sources(docs)}
 
-        answer = self.llm_generator.generate_answer(question, docs=docs, session_id=session_id)
+        answer = self.llm_generator.generate_answer(
+            question, docs=docs, session_id=session_id
+        )
         logger.info(
             "Answer generated (%d chars): %s%s",
             len(answer),

@@ -54,7 +54,9 @@ class LLMGenerator:
         self.retriever = retriever
         self.prompt_template_str = self._get_prompt_template()
         self.system_prompt_str = self._get_system_prompt()
-        self.history_enabled = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
+        self.history_enabled = getattr(
+            settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True
+        )
         self.history_recent_window = int(
             getattr(settings, "WAGTAIL_RAG_CHAT_HISTORY_RECENT_MESSAGES", 6)
         )
@@ -103,7 +105,9 @@ class LLMGenerator:
             try:
                 return self._create_lcel_chain()
             except Exception:
-                logger.exception("Failed to create LCEL QA chain; falling back to legacy")
+                logger.exception(
+                    "Failed to create LCEL QA chain; falling back to legacy"
+                )
 
         if LEGACY_AVAILABLE:
             try:
@@ -178,7 +182,11 @@ class LLMGenerator:
         context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
         max_chars = int(getattr(settings, "WAGTAIL_RAG_MAX_CONTEXT_CHARS", 0))
         if max_chars and len(context) > max_chars:
-            context = context[: max_chars - 3] + "..." if max_chars > 3 else context[:max_chars]
+            context = (
+                context[: max_chars - 3] + "..."
+                if max_chars > 3
+                else context[:max_chars]
+            )
         return context
 
     def _is_chat_model(self) -> bool:
@@ -261,7 +269,9 @@ class LLMGenerator:
         """
         context = self._get_context_from_docs(docs)
         input_text = f"Context:\n{context}\n\nQuestion:\n{question}"
-        prompt_text = self.prompt_template_str.format(context=context, question=question)
+        prompt_text = self.prompt_template_str.format(
+            context=context, question=question
+        )
 
         is_chat_model = self._is_chat_model()
 
@@ -289,7 +299,9 @@ class LLMGenerator:
         If no docs provided, falls back to the QA chain.
         """
         if docs:
-            logger.debug("Using %d pre-retrieved document(s) for LLM context", len(docs))
+            logger.debug(
+                "Using %d pre-retrieved document(s) for LLM context", len(docs)
+            )
             return self.generate_answer_with_llm(question, docs, session_id=session_id)
 
         if self.qa_chain is None:

@@ -3,7 +3,6 @@ RAG index building — orchestrates page discovery, extraction, and vector stora
 """
 
 import logging
-import os
 from collections.abc import Callable, Iterable
 from typing import Optional
 
@@ -177,13 +176,9 @@ def build_rag_index(
         )
     )
 
-    backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss")
-    collection = getattr(settings, "WAGTAIL_RAG_COLLECTION_NAME", "wagtail_rag")
-    path = getattr(
-        settings,
-        "WAGTAIL_RAG_CHROMA_PATH",
-        os.path.join(settings.BASE_DIR, "chroma_db"),
-    )
+    backend = conf.vector_store.backend
+    collection = conf.vector_store.collection
+    path = conf.vector_store.path
 
     _write(stdout, f"Vector store: {backend.upper()}")
     _write(stdout, f"Collection:   {collection}")
@@ -263,7 +258,9 @@ def build_rag_index(
                     continue
 
                 extracted_fields = docs[0].metadata.get("extracted_fields", "title")
-                _write(stdout, f"    Indexed: {extracted_fields} → {len(docs)} chunk(s)")
+                _write(
+                    stdout, f"    Indexed: {extracted_fields} → {len(docs)} chunk(s)"
+                )
 
                 for doc in docs:
                     doc.metadata.update(

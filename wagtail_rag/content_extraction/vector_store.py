@@ -273,7 +273,7 @@ class ChromaVectorStore(BaseVectorStore):
             data = self.db.get(where={"page_id": page_id})
         except Exception:
             return False
-        for meta in (data.get("metadatas") or []):
+        for meta in data.get("metadatas") or []:
             if meta.get("page_id") != page_id:
                 continue
             if last_published_at is None:
@@ -286,7 +286,9 @@ class ChromaVectorStore(BaseVectorStore):
     ) -> int:
         try:
             try:
-                data = self.db.get(where={"source": source}) if source else self.db.get()
+                data = (
+                    self.db.get(where={"source": source}) if source else self.db.get()
+                )
             except Exception:
                 data = self.db.get()
 
@@ -319,7 +321,9 @@ def _pgvector_connection_string() -> str:
     Reads WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING first; falls back to
     deriving one from DATABASES['default'] (must be PostgreSQL).
     """
-    explicit = getattr(settings, "WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING", None)
+    from wagtail_rag.conf import conf
+
+    explicit = conf.vector_store.connection_string
     if explicit:
         return explicit
 
@@ -332,7 +336,11 @@ def _pgvector_connection_string() -> str:
         )
     host = db.get("HOST") or "localhost"
     port = db.get("PORT") or 5432
-    name, user, password = db.get("NAME", ""), db.get("USER", ""), db.get("PASSWORD", "")
+    name, user, password = (
+        db.get("NAME", ""),
+        db.get("USER", ""),
+        db.get("PASSWORD", ""),
+    )
     if password:
         return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}"
     return f"postgresql+psycopg2://{user}@{host}:{port}/{name}"
@@ -372,7 +380,9 @@ class PgVectorStore(BaseVectorStore):
                 ).fetchone()
                 return str(row[0]) if row else None
         except Exception:
-            logger.warning("Could not fetch pgvector collection ID for %r", self._collection)
+            logger.warning(
+                "Could not fetch pgvector collection ID for %r", self._collection
+            )
             return None
 
     def reset(self) -> None:
@@ -510,7 +520,9 @@ def get_vector_store(
         backend: 'faiss', 'chroma', or 'pgvector'.
                  Defaults to WAGTAIL_RAG_VECTOR_STORE_BACKEND setting.
     """
-    backend = (backend or getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss")).lower()
+    from wagtail_rag.conf import conf
+
+    backend = (backend or conf.vector_store.backend).lower()
     cls = _BACKENDS.get(backend)
     if cls is None:
         raise ValueError(

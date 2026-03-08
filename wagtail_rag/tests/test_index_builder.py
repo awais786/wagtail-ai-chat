@@ -20,7 +20,9 @@ class TestIndexBuilder(unittest.TestCase):
         names = _parse_model_fields_shorthand(
             ["blog.BlogPage", "breads.BreadPage:*", "locations.LocationPage"]
         )
-        self.assertEqual(names, ["blog.BlogPage", "breads.BreadPage", "locations.LocationPage"])
+        self.assertEqual(
+            names, ["blog.BlogPage", "breads.BreadPage", "locations.LocationPage"]
+        )
 
         # No :* — returned unchanged
         names = _parse_model_fields_shorthand(["blog.BlogPage", "breads.BreadPage"])
@@ -35,12 +37,11 @@ class TestPgvectorConnectionString(unittest.TestCase):
 
     def test_explicit_setting_takes_precedence(self):
         explicit = "postgresql+psycopg2://user:pass@db:5432/mydb"
-        mock_settings = MagicMock()
-        mock_settings.WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING = explicit
 
-        with patch(
-            "wagtail_rag.content_extraction.vector_store.settings", mock_settings
-        ):
+        with patch("wagtail_rag.conf.django_settings") as mock_conf_settings:
+            mock_conf_settings.WAGTAIL_RAG = {
+                "vector_store": {"connection_string": explicit}
+            }
             result = _pgvector_connection_string()
 
         self.assertEqual(result, explicit)

@@ -49,11 +49,13 @@ class BaseEmbeddingProvider(ABC):
 
 class HuggingFaceProvider(BaseEmbeddingProvider):
     def create(self, model_name: Optional[str], **kwargs) -> Any:
-        cls = _import_class([
-            ("langchain_huggingface", "HuggingFaceEmbeddings"),
-            ("langchain_community.embeddings", "HuggingFaceEmbeddings"),
-            ("langchain.embeddings", "HuggingFaceEmbeddings"),
-        ])
+        cls = _import_class(
+            [
+                ("langchain_huggingface", "HuggingFaceEmbeddings"),
+                ("langchain_community.embeddings", "HuggingFaceEmbeddings"),
+                ("langchain.embeddings", "HuggingFaceEmbeddings"),
+            ]
+        )
         if cls is None:
             raise ImportError(
                 "HuggingFace embeddings are not installed. "
@@ -66,10 +68,12 @@ class HuggingFaceProvider(BaseEmbeddingProvider):
 
 class OpenAIProvider(BaseEmbeddingProvider):
     def create(self, model_name: Optional[str], **kwargs) -> Any:
-        cls = _import_class([
-            ("langchain_openai", "OpenAIEmbeddings"),
-            ("langchain.embeddings", "OpenAIEmbeddings"),
-        ])
+        cls = _import_class(
+            [
+                ("langchain_openai", "OpenAIEmbeddings"),
+                ("langchain.embeddings", "OpenAIEmbeddings"),
+            ]
+        )
         if cls is None:
             raise ImportError(
                 "OpenAI embeddings are not installed. "
@@ -77,18 +81,24 @@ class OpenAIProvider(BaseEmbeddingProvider):
             )
         if not model_name:
             raise ValueError("model_name is required for OpenAI embeddings")
-        api_key = kwargs.pop("api_key", None) or getattr(self.settings, "OPENAI_API_KEY", None)
+        api_key = kwargs.pop("api_key", None) or getattr(
+            self.settings, "OPENAI_API_KEY", None
+        )
         if not api_key:
-            raise ValueError("OPENAI_API_KEY must be set in settings or passed as api_key")
+            raise ValueError(
+                "OPENAI_API_KEY must be set in settings or passed as api_key"
+            )
         return cls(model=model_name, api_key=api_key, **kwargs)
 
 
 class OllamaProvider(BaseEmbeddingProvider):
     def create(self, model_name: Optional[str], **kwargs) -> Any:
-        cls = _import_class([
-            ("langchain_ollama", "OllamaEmbeddings"),
-            ("langchain.embeddings", "OllamaEmbeddings"),
-        ])
+        cls = _import_class(
+            [
+                ("langchain_ollama", "OllamaEmbeddings"),
+                ("langchain.embeddings", "OllamaEmbeddings"),
+            ]
+        )
         if cls is None:
             raise ImportError(
                 "Ollama embeddings are not installed. "
@@ -109,19 +119,25 @@ class SentenceTransformerProvider(BaseEmbeddingProvider):
 
     def create(self, model_name: Optional[str], **kwargs) -> Any:
         if not model_name:
-            raise ValueError("model_name is required for sentence-transformers embeddings")
+            raise ValueError(
+                "model_name is required for sentence-transformers embeddings"
+            )
 
-        cls = _import_class([
-            ("langchain_community.embeddings", "SentenceTransformerEmbeddings"),
-        ])
+        cls = _import_class(
+            [
+                ("langchain_community.embeddings", "SentenceTransformerEmbeddings"),
+            ]
+        )
         if cls is not None:
             return cls(model_name=model_name, **kwargs)
 
         # Fallback: HuggingFaceEmbeddings also wraps sentence-transformers.
-        cls = _import_class([
-            ("langchain_huggingface", "HuggingFaceEmbeddings"),
-            ("langchain_community.embeddings", "HuggingFaceEmbeddings"),
-        ])
+        cls = _import_class(
+            [
+                ("langchain_huggingface", "HuggingFaceEmbeddings"),
+                ("langchain_community.embeddings", "HuggingFaceEmbeddings"),
+            ]
+        )
         if cls is not None:
             logger.debug(
                 "SentenceTransformerEmbeddings unavailable; falling back to HuggingFaceEmbeddings"
@@ -164,12 +180,13 @@ class EmbeddingProviderFactory:
         if provider in {"huggingface", "hf"}:
             return "/" in model_name and not model_name.startswith("text-embedding-")
         if provider in {"sentence-transformers", "sentence_transformers"}:
-            return (
-                not model_name.startswith("text-embedding-")
-                and not model_name.startswith("gpt-")
-            )
+            return not model_name.startswith(
+                "text-embedding-"
+            ) and not model_name.startswith("gpt-")
         if provider == "ollama":
-            return "/" not in model_name and not model_name.startswith("text-embedding-")
+            return "/" not in model_name and not model_name.startswith(
+                "text-embedding-"
+            )
         return True
 
     def _resolve_setting_model_name(self, provider: str) -> Optional[str]:
@@ -236,22 +253,26 @@ class EmbeddingProviderFactory:
             **kwargs: Provider-specific arguments
         """
         group = (getattr(self.settings, "WAGTAIL_RAG", {}) or {}).get("embedding") or {}
-        default_provider = (
-            group.get("provider")
-            or getattr(self.settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface")
+        default_provider = group.get("provider") or getattr(
+            self.settings, "WAGTAIL_RAG_EMBEDDING_PROVIDER", "huggingface"
         )
         provider_key = (provider or default_provider).lower()
         resolved_model = self._resolve_model_name(provider_key, model_name)
         logger.info(
-            "Initializing embeddings: provider='%s', model='%s'", provider_key, resolved_model
+            "Initializing embeddings: provider='%s', model='%s'",
+            provider_key,
+            resolved_model,
         )
 
         provider_cls = self.PROVIDER_MAP.get(provider_key)
         if not provider_cls:
-            canonical = sorted({
-                k for k in self.PROVIDER_MAP
-                if k not in ("hf", "sentence-transformers", "sentence_transformers")
-            })
+            canonical = sorted(
+                {
+                    k
+                    for k in self.PROVIDER_MAP
+                    if k not in ("hf", "sentence-transformers", "sentence_transformers")
+                }
+            )
             raise ValueError(
                 f"Unknown embedding provider: {provider_key!r}. "
                 f"Supported: {', '.join(canonical)}"
@@ -270,7 +291,9 @@ def get_embeddings(
     This is important for tests that override settings and for apps that
     configure settings after the module is first imported.
     """
-    return EmbeddingProviderFactory().get(provider=provider, model_name=model_name, **kwargs)
+    return EmbeddingProviderFactory().get(
+        provider=provider, model_name=model_name, **kwargs
+    )
 
 
 __all__ = [

@@ -65,18 +65,18 @@ Pick one setup block and add it to `settings.py`:
 
 ```python
 # --- Option A: Local (Ollama + Sentence Transformers + FAISS) ---
-WAGTAIL_RAG_EMBEDDING_PROVIDER   = "sentence-transformers"
-WAGTAIL_RAG_EMBEDDING_MODEL      = "all-MiniLM-L6-v2"
-WAGTAIL_RAG_LLM_PROVIDER         = "ollama"
-WAGTAIL_RAG_MODEL_NAME           = "mistral"
-WAGTAIL_RAG_VECTOR_STORE_BACKEND = "faiss"
-WAGTAIL_RAG_CHROMA_PATH          = os.path.join(BASE_DIR, "faiss_index")
+WAGTAIL_RAG = {
+    "embedding":    {"provider": "sentence-transformers", "model": "all-MiniLM-L6-v2"},
+    "llm":          {"provider": "ollama", "model": "mistral"},
+    "vector_store": {"backend": "faiss", "path": os.path.join(BASE_DIR, "faiss_index")},
+}
 
 # --- Option B: OpenAI ---
-WAGTAIL_RAG_EMBEDDING_PROVIDER   = "openai"
-WAGTAIL_RAG_EMBEDDING_MODEL      = "text-embedding-3-small"
-WAGTAIL_RAG_LLM_PROVIDER         = "openai"
-WAGTAIL_RAG_MODEL_NAME           = "gpt-4o"
+WAGTAIL_RAG = {
+    "embedding":    {"provider": "openai", "model": "text-embedding-3-small"},
+    "llm":          {"provider": "openai", "model": "gpt-4o"},
+    "vector_store": {"backend": "faiss", "path": os.path.join(BASE_DIR, "faiss_index")},
+}
 # Set OPENAI_API_KEY as an environment variable, not here
 ```
 
@@ -119,13 +119,13 @@ python manage.py rag test
 
 ### 7. Add the chatbox widget to your base template (optional)
 
+Add just before `</body>` in your base template:
+
 ```django
-<div style="position: fixed; bottom: 1rem; right: 1rem; z-index: 9999;">
-    {% include "wagtail_rag/chatbox.html" %}
-</div>
+{% include "wagtail_rag/chatbox.html" %}
 ```
 
-The widget reads the Django `csrftoken` cookie and sends it automatically on every request.
+This renders a floating action button (bottom-right). Clicking it opens the chat panel. The widget reads the Django `csrftoken` cookie and sends it automatically on every request.
 
 ---
 
@@ -209,24 +209,22 @@ make clean           # remove cache and build files
 ### Core
 
 ```python
-WAGTAIL_RAG_VECTOR_STORE_BACKEND = "faiss"       # "faiss" | "chroma" | "pgvector"
-WAGTAIL_RAG_COLLECTION_NAME      = "wagtail_rag"
-WAGTAIL_RAG_CHROMA_PATH          = os.path.join(BASE_DIR, "faiss_index")
-
-WAGTAIL_RAG_LLM_PROVIDER         = "ollama"      # "ollama" | "openai" | "anthropic"
-WAGTAIL_RAG_MODEL_NAME           = "mistral"
-
-WAGTAIL_RAG_EMBEDDING_PROVIDER   = "sentence-transformers"
-WAGTAIL_RAG_EMBEDDING_MODEL      = "all-MiniLM-L6-v2"
-```
-
-### pgvector
-
-```python
-WAGTAIL_RAG_VECTOR_STORE_BACKEND       = "pgvector"
-# Auto-derived from DATABASES['default'] when using PostgreSQL.
-# Set explicitly to override:
-WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING = "postgresql+psycopg2://user:pass@host:5432/db"
+WAGTAIL_RAG = {
+    "embedding": {
+        "provider": "sentence-transformers",  # "sentence-transformers" | "huggingface" | "openai"
+        "model":    "all-MiniLM-L6-v2",
+    },
+    "llm": {
+        "provider": "ollama",  # "ollama" | "openai" | "anthropic"
+        "model":    "mistral",
+    },
+    "vector_store": {
+        "backend":    "faiss",                           # "faiss" | "chroma" | "pgvector"
+        "path":       os.path.join(BASE_DIR, "faiss_index"),
+        "collection": "wagtail_rag",
+        # "connection_string": "postgresql+psycopg2://..."  # pgvector only
+    },
+}
 ```
 
 ### Retrieval
@@ -261,35 +259,33 @@ WAGTAIL_RAG_ENABLE_CHAT_HISTORY      = True
 WAGTAIL_RAG_CHAT_HISTORY_RECENT_MESSAGES = 6
 ```
 
-### Provider-specific model overrides
+### pgvector (PostgreSQL)
+
+Use pgvector when you want the vector index stored in your existing PostgreSQL database rather than on disk.
 
 ```python
-# Use these to avoid cross-provider model name conflicts
-WAGTAIL_RAG_OPENAI_MODEL_NAME            = "gpt-4o"
-WAGTAIL_RAG_ANTHROPIC_MODEL_NAME         = "claude-3-5-sonnet-20241022"
-WAGTAIL_RAG_OLLAMA_MODEL_NAME            = "mistral"
-
-WAGTAIL_RAG_OPENAI_EMBEDDING_MODEL       = "text-embedding-3-small"
-WAGTAIL_RAG_OLLAMA_EMBEDDING_MODEL       = "nomic-embed-text"
-WAGTAIL_RAG_HUGGINGFACE_EMBEDDING_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"
+WAGTAIL_RAG = {
+    "embedding": {
+        "provider": "openai",
+        "model":    "text-embedding-3-small",
+    },
+    "llm": {
+        "provider": "openai",
+        "model":    "gpt-4o",
+    },
+    "vector_store": {
+        "backend":           "pgvector",
+        "collection":        "wagtail_rag",
+        # Explicit connection string — omit to auto-derive from DATABASES['default']
+        "connection_string": "postgresql+psycopg2://user:password@localhost:5432/mydb",
+    },
+}
 ```
 
-### Custom prompt templates
+If `connection_string` is omitted, the connection is derived automatically from `DATABASES['default']` (must be a PostgreSQL engine). Install the extra:
 
-```python
-WAGTAIL_RAG_PROMPT_TEMPLATE = """You are a helpful assistant for a Wagtail CMS website.
-Answer ONLY using the context below. Cite the source page when possible.
-If the context does not contain the answer, say "I don't have enough information."
-
-Context:
-{context}
-
-Question:
-{question}
-
-Answer:"""
-
-WAGTAIL_RAG_SYSTEM_PROMPT = "You are a helpful assistant. Answer using only the provided context."
+```bash
+pip install "wagtail-rag[pgvector]"
 ```
 
 ---
@@ -335,14 +331,14 @@ Response `200`:
 }
 ```
 
-Error codes: `400` bad request · `403` missing/invalid CSRF token · `413` body too large · `500` server error.
+Error codes: `400` bad request · `403` missing/invalid CSRF token · `413` body too large · `415` wrong Content-Type · `500` server error.
 
 ---
 
 ## Python API
 
 ```python
-from wagtail_rag.rag_chatbot import get_chatbot
+from wagtail_rag.chatbot import get_chatbot
 
 chatbot = get_chatbot()
 result  = chatbot.query("What types of bread do you have?")
@@ -399,10 +395,12 @@ CI runs on Python 3.11 and 3.12 against Django 4.2 and 5.2.
 make index-rebuild
 ```
 
-**"The model X does not exist"** — model name doesn't match the provider. Use provider-specific settings:
+**"The model X does not exist"** — model name doesn't match the provider. Set the correct model in `WAGTAIL_RAG`:
 ```python
-WAGTAIL_RAG_OPENAI_MODEL_NAME = "gpt-4o"
-WAGTAIL_RAG_OLLAMA_MODEL_NAME = "mistral"
+WAGTAIL_RAG = {
+    "llm": {"provider": "openai", "model": "gpt-4o"},
+    ...
+}
 ```
 
 **"No pages found to index"** — check pages are published and `WAGTAIL_RAG_MODELS` names are correct (format: `"app.ModelName"`).

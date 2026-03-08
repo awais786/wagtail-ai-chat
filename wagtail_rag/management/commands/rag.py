@@ -144,12 +144,12 @@ class Command(BaseCommand):
         model_names = getattr(settings, "WAGTAIL_RAG_MODELS", None)
         chunk_size = getattr(settings, "WAGTAIL_RAG_CHUNK_SIZE", 1000)
         chunk_overlap = getattr(settings, "WAGTAIL_RAG_CHUNK_OVERLAP", 200)
-        collection = getattr(settings, "WAGTAIL_RAG_COLLECTION_NAME", "wagtail_rag")
+        collection = conf.vector_store.collection
         emb_provider = conf.embedding.provider
         emb_model = conf.embedding.model
         llm_provider = conf.llm.provider
         llm_model = conf.llm.model
-        backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss")
+        backend = conf.vector_store.backend
 
         self._section("Wagtail RAG — Index")
         self.stdout.write(
@@ -208,8 +208,8 @@ class Command(BaseCommand):
         llm_model = conf.llm.model or "default"
         emb_provider = conf.embedding.provider
         emb_model = conf.embedding.model
-        backend = getattr(settings, "WAGTAIL_RAG_VECTOR_STORE_BACKEND", "faiss")
-        collection = getattr(settings, "WAGTAIL_RAG_COLLECTION_NAME", "wagtail_rag")
+        backend = conf.vector_store.backend
+        collection = conf.vector_store.collection
         use_hybrid = getattr(settings, "WAGTAIL_RAG_USE_HYBRID_SEARCH", True)
         retrieve_k = getattr(settings, "WAGTAIL_RAG_RETRIEVE_K", 8)
         history_in_settings = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)

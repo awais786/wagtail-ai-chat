@@ -54,7 +54,9 @@ class OllamaProvider(BaseLLMProvider):
             except (ImportError, AttributeError):
                 continue
 
-        raise ImportError("Ollama not found. Run: pip install langchain-community ollama")
+        raise ImportError(
+            "Ollama not found. Run: pip install langchain-community ollama"
+        )
 
 
 class OpenAIProvider(BaseLLMProvider):
@@ -69,9 +71,13 @@ class OpenAIProvider(BaseLLMProvider):
         if not model_name:
             raise ValueError("model_name is required for OpenAI provider")
 
-        api_key = kwargs.pop("api_key", None) or getattr(self.settings, "OPENAI_API_KEY", None)
+        api_key = kwargs.pop("api_key", None) or getattr(
+            self.settings, "OPENAI_API_KEY", None
+        )
         if not api_key:
-            raise ValueError("OPENAI_API_KEY must be set in settings or passed as api_key")
+            raise ValueError(
+                "OPENAI_API_KEY must be set in settings or passed as api_key"
+            )
 
         return ChatOpenAI(model=model_name, api_key=api_key, **kwargs)
 
@@ -88,9 +94,13 @@ class AnthropicProvider(BaseLLMProvider):
         if not model_name:
             raise ValueError("model_name is required for Anthropic provider")
 
-        api_key = kwargs.pop("api_key", None) or getattr(self.settings, "ANTHROPIC_API_KEY", None)
+        api_key = kwargs.pop("api_key", None) or getattr(
+            self.settings, "ANTHROPIC_API_KEY", None
+        )
         if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY must be set in settings or passed as api_key")
+            raise ValueError(
+                "ANTHROPIC_API_KEY must be set in settings or passed as api_key"
+            )
 
         return ChatAnthropic(model=model_name, api_key=api_key, **kwargs)
 
@@ -106,7 +116,9 @@ class HuggingFaceProvider(BaseLLMProvider):
         endpoint_url = kwargs.get("endpoint_url") or getattr(
             self.settings, "HUGGINGFACE_ENDPOINT_URL", None
         )
-        api_key = kwargs.get("api_key") or getattr(self.settings, "HUGGINGFACE_API_KEY", None)
+        api_key = kwargs.get("api_key") or getattr(
+            self.settings, "HUGGINGFACE_API_KEY", None
+        )
 
         if endpoint_url:
             try:
@@ -158,7 +170,9 @@ class HuggingFaceProvider(BaseLLMProvider):
         task = kwargs.pop("task", "text-generation")
         model_id = kwargs.pop("model_id", model_name)
         if not model_id:
-            raise ValueError("model_name or model_id is required for HuggingFace pipeline")
+            raise ValueError(
+                "model_name or model_id is required for HuggingFace pipeline"
+            )
 
         pipeline_kwargs = {
             k: v for k, v in kwargs.items() if k not in ("endpoint_url", "api_key")
@@ -226,7 +240,9 @@ class LLMProviderFactory:
                 return value
         return getattr(self.settings, "WAGTAIL_RAG_MODEL_NAME", None)
 
-    def _resolve_model_name(self, provider: str, model_name: Optional[str]) -> Optional[str]:
+    def _resolve_model_name(
+        self, provider: str, model_name: Optional[str]
+    ) -> Optional[str]:
         """Resolve model name from explicit value, settings, or provider defaults."""
         if model_name:
             return model_name
@@ -264,9 +280,8 @@ class LLMProviderFactory:
             **kwargs: Provider-specific arguments
         """
         group = (getattr(self.settings, "WAGTAIL_RAG", {}) or {}).get("llm") or {}
-        default_provider = (
-            group.get("provider")
-            or getattr(self.settings, "WAGTAIL_RAG_LLM_PROVIDER", "ollama")
+        default_provider = group.get("provider") or getattr(
+            self.settings, "WAGTAIL_RAG_LLM_PROVIDER", "ollama"
         )
         provider_key = (provider or default_provider).lower()
         resolved_model = self._resolve_model_name(provider_key, model_name)

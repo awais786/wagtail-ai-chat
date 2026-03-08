@@ -69,7 +69,10 @@ class EmbeddingSearcher:
             return ""
         try:
             from bs4 import BeautifulSoup  # type: ignore
-            return BeautifulSoup(text, "html.parser").get_text(separator=" ", strip=True)
+
+            return BeautifulSoup(text, "html.parser").get_text(
+                separator=" ", strip=True
+            )
         except Exception as e:
             logger.debug("BeautifulSoup unavailable, stripping HTML with regex: %s", e)
             return " ".join(re.sub(r"<[^>]+>", " ", text).split())
@@ -83,9 +86,7 @@ class EmbeddingSearcher:
 
     # --- Vector search (primary) ---
 
-    def _get_vector_docs(
-        self, query: str
-    ) -> tuple[list[Document], set[str], set[Any]]:
+    def _get_vector_docs(self, query: str) -> tuple[list[Document], set[str], set[Any]]:
         """Perform vector search (primary search method).
 
         Returns:
@@ -123,6 +124,7 @@ class EmbeddingSearcher:
         """Lazy import of Wagtail Page model."""
         try:
             from wagtail.models import Page  # type: ignore
+
             return Page
         except Exception as e:
             logger.debug("Wagtail Page model not available: %s", e)
@@ -132,6 +134,7 @@ class EmbeddingSearcher:
         """Lazy import of page_to_documents_api_extractor."""
         try:
             from wagtail_rag.content_extraction import page_to_documents_api_extractor
+
             return page_to_documents_api_extractor
         except Exception as e:
             logger.debug("page_to_documents_api_extractor not available: %s", e)
@@ -226,7 +229,9 @@ class EmbeddingSearcher:
                     len(wagtail_results),
                 )
         except Exception as e:
-            logger.warning("Wagtail search failed for query '%s': %s", query, e, exc_info=True)
+            logger.warning(
+                "Wagtail search failed for query '%s': %s", query, e, exc_info=True
+            )
 
         return docs
 
@@ -255,7 +260,9 @@ class EmbeddingSearcher:
 
         return docs
 
-    def _rerank_by_title_match(self, query: str, docs: list[Document]) -> list[Document]:
+    def _rerank_by_title_match(
+        self, query: str, docs: list[Document]
+    ) -> list[Document]:
         """Rerank docs by title similarity to the query."""
         query_lower = query.lower().strip("?").strip()
         query_words = set(query_lower.split())
@@ -361,7 +368,9 @@ class EmbeddingSearcher:
         other: list[dict[str, Any]] = []
 
         for result in results:
-            title_words = set((result.get("metadata") or {}).get("title", "").lower().split())
+            title_words = set(
+                (result.get("metadata") or {}).get("title", "").lower().split()
+            )
             score_ok = (
                 max_score is None or result.get("score", float("inf")) <= max_score
             )

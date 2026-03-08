@@ -24,7 +24,9 @@ def _format_messages(messages: list[BaseMessage]) -> str:
         if not content:
             continue
         label = (
-            "User" if role == "human" else "Assistant" if role == "ai" else role.capitalize()
+            "User"
+            if role == "human"
+            else "Assistant" if role == "ai" else role.capitalize()
         )
         lines.append(f"{label}: {content}")
     return "\n".join(lines)
