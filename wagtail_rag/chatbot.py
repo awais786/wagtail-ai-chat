@@ -138,10 +138,39 @@ class RAGChatBot:
         return base_retriever
 
     def _format_sources(self, docs) -> list[dict]:
-        return [
-            {"content": doc.page_content[:200] + "...", "metadata": doc.metadata}
-            for doc in docs
-        ]
+        """Return one source entry per unique page (deduplicated by page_id)."""
+        seen = set()
+        sources = []
+        for doc in docs:
+            page_id = doc.metadata.get("page_id") or doc.metadata.get("title")
+            if page_id in seen:
+                continue
+            seen.add(page_id)
+            sources.append({"content": doc.page_content[:200] + "...", "metadata": doc.metadata})
+        return sources
+
+    def _build_retrieval_query(self, question: str, session_id: str) -> str:
+        """Prepend recent human turns to the question for better retrieval.
+
+        Vague follow-up questions like "do you know the ingredients?" have no
+        context for the vector search. Prepending the previous human turn gives
+        the retriever enough signal to find the right documents.
+        """
+        try:
+            history = self.llm_generator.history_store.get_session_history(session_id)
+            messages = history.messages
+            if not messages:
+                return question
+            human_turns = [
+                m.content for m in messages
+                if getattr(m, "type", "") == "human" and getattr(m, "content", "")
+            ]
+            if not human_turns:
+                return question
+            # Use the last human turn as context prefix for retrieval.
+            return f"{human_turns[-1]} {question}"
+        except Exception:
+            return question
 
     def query(
         self,
@@ -162,8 +191,17 @@ class RAGChatBot:
             {'answer': str | None, 'sources': list[dict]}
         """
         logger.info("RAG query: %r", question)
+
+        # For follow-up questions, enrich the retrieval query with recent history
+        # so vector search finds relevant docs even for vague questions.
+        retrieval_query = question
+        if session_id and self.llm_generator.history_store:
+            retrieval_query = self._build_retrieval_query(question, session_id)
+            if retrieval_query != question:
+                logger.debug("Retrieval query enriched: %r", retrieval_query)
+
         docs = self.embedding_searcher.retrieve_with_embeddings(
-            question, boost_title_matches=boost_title_matches
+            retrieval_query, boost_title_matches=boost_title_matches
         )
         logger.info("Retrieved %d document(s)", len(docs))
 

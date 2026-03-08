@@ -70,30 +70,24 @@ class LLMGenerator:
 
     def _get_prompt_template(self) -> str:
         return (
-            "You are an expert assistant helping users find information from website content. "
-            "Analyze the provided context carefully and provide accurate, helpful answers.\n\n"
-            "**Guidelines:**\n"
-            "1. Use ONLY information from the context provided below\n"
-            "2. When citing information, reference the source page title or section\n"
-            "3. For structured content (like FAQ sections, numbered lists, or procedures), "
-            "maintain the original organization\n"
-            "4. If content has sections or categories, organize your response accordingly\n"
-            "5. If you cannot find relevant information in the context, clearly state: "
-            '"I don\'t have enough information in the available content to answer that question."\n'
-            "6. For multi-part questions, address each part systematically\n"
-            "7. Preserve important formatting like bullet points, numbers, or hierarchical "
-            "structure when relevant\n\n"
-            "**Context:**\n{context}\n\n"
-            "**Question:**\n{question}\n\n"
-            "**Answer:**"
+            "You are an assistant that answers questions strictly from the provided context.\n\n"
+            "IMPORTANT RULES:\n"
+            "- Answer ONLY using information that appears in the context below.\n"
+            "- Do NOT use your general knowledge or training data.\n"
+            "- If the context does not contain enough information to answer, respond with: "
+            '"I don\'t have that information in the available content."\n'
+            "- Do not guess or infer beyond what is explicitly stated.\n\n"
+            "Context:\n{context}\n\n"
+            "Question:\n{question}\n\n"
+            "Answer:"
         )
 
     def _get_system_prompt(self) -> str:
         return (
-            "You are a knowledgeable assistant for a website. "
-            "Answer questions using ONLY the provided context. "
-            "Maintain the structure and organization of the source content when relevant. "
-            "Always cite sources and clearly state if information is not available."
+            "You are a website assistant. Answer questions using ONLY the provided context. "
+            "Never use your general knowledge. "
+            "If the answer is not in the context, say: "
+            '"I don\'t have that information in the available content."'
         )
 
     def _create_qa_chain(self) -> Optional[Any]:
