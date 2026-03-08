@@ -1,14 +1,11 @@
 """
 LLM Generation Module for RAG Chatbot.
 
-This module handles LLM (Large Language Model) generation functionality,
-including prompt construction and answer generation with proper context handling.
+Handles prompt construction and answer generation with context.
 """
 
-from __future__ import annotations
-
 import logging
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from django.conf import settings
 
@@ -16,7 +13,6 @@ from wagtail_rag.chat_history import get_history_store
 
 logger = logging.getLogger(__name__)
 
-# Import LangChain components with simplified detection
 try:
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain_core.runnables import RunnablePassthrough, RunnableWithMessageHistory
@@ -26,7 +22,6 @@ try:
 
     LCEL_AVAILABLE = True
 except ImportError:
-    # Set to None for graceful degradation
     ChatPromptTemplate = MessagesPlaceholder = RunnablePassthrough = None
     RunnableWithMessageHistory = StrOutputParser = HumanMessage = BaseChatModel = None
     LCEL_AVAILABLE = False
@@ -42,29 +37,24 @@ except ImportError:
 
 
 class LLMGenerator:
-    """
-    Handles LLM-based answer generation for RAG chatbot.
+    """Handles LLM-based answer generation for the RAG chatbot.
 
-    This class encapsulates all LLM generation logic including:
-    - Prompt template construction
-    - QA chain setup (LCEL or legacy)
-    - Answer generation with context
+    Encapsulates prompt construction, QA chain setup (LCEL or legacy),
+    and answer generation with retrieved context.
     """
 
     def __init__(self, llm: Any, retriever: Optional[Any] = None):
         """Initialize the generator.
 
         Args:
-            llm: A callable or LangChain LLM object.
+            llm: A LangChain LLM or chat model instance.
             retriever: Optional retriever used by QA chains.
         """
         self.llm = llm
         self.retriever = retriever
         self.prompt_template_str = self._get_prompt_template()
         self.system_prompt_str = self._get_system_prompt()
-        self.history_enabled = getattr(
-            settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True
-        )
+        self.history_enabled = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
         self.history_recent_window = int(
             getattr(settings, "WAGTAIL_RAG_CHAT_HISTORY_RECENT_MESSAGES", 6)
         )
@@ -77,7 +67,6 @@ class LLMGenerator:
         self.history_chain = self._create_history_chain()
 
     def _get_prompt_template(self) -> str:
-        """Return prompt template optimized for structured content."""
         return getattr(
             settings,
             "WAGTAIL_RAG_PROMPT_TEMPLATE",
@@ -102,7 +91,6 @@ class LLMGenerator:
         )
 
     def _get_system_prompt(self) -> str:
-        """System prompt optimized for structured content handling."""
         return getattr(
             settings,
             "WAGTAIL_RAG_SYSTEM_PROMPT",
@@ -110,10 +98,7 @@ class LLMGenerator:
         )
 
     def _create_qa_chain(self) -> Optional[Any]:
-        """Attempt to construct a QA chain using available LangChain interfaces.
-
-        Returns the constructed chain or None if no retriever or supported chain is available.
-        """
+        """Construct a QA chain using available LangChain interfaces."""
         if not self.retriever:
             return None
 
@@ -121,9 +106,7 @@ class LLMGenerator:
             try:
                 return self._create_lcel_chain()
             except Exception:
-                logger.exception(
-                    "Failed to create LCEL QA chain; falling back to legacy if available"
-                )
+                logger.exception("Failed to create LCEL QA chain; falling back to legacy")
 
         if LEGACY_AVAILABLE:
             try:
@@ -152,7 +135,6 @@ class LLMGenerator:
                 ("human", "{input}"),
             ]
         )
-
         chain = prompt | self.llm | StrOutputParser()  # type: ignore[operator]
         return RunnableWithMessageHistory(  # type: ignore[call-arg]
             chain,
@@ -162,26 +144,17 @@ class LLMGenerator:
         )
 
     def _create_lcel_chain(self) -> Any:
-        """Create an LCEL-style chain using langchain_core primitives.
-
-        This will raise ImportError if required components are missing.
-        """
+        """Create an LCEL-style chain using langchain_core primitives."""
         if not (ChatPromptTemplate and RunnablePassthrough and StrOutputParser):
             raise ImportError("LCEL primitives are not available")
 
         prompt = ChatPromptTemplate.from_template(self.prompt_template_str)  # type: ignore[attr-defined]
 
-        def format_docs(
-            docs: List[Any],
-        ) -> str:  # simple formatter used in runnable composition
+        def format_docs(docs: list[Any]) -> str:
             return "\n\n".join(getattr(d, "page_content", "") for d in docs)
 
-        # Compose runnables: retriever -> format_docs -> prompt -> llm -> parser
         return (
-            {
-                "context": self.retriever | format_docs,
-                "question": RunnablePassthrough(),
-            }
+            {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
             | prompt
             | self.llm
             | StrOutputParser()  # type: ignore[call-arg]
@@ -192,7 +165,9 @@ class LLMGenerator:
         if not (PromptTemplate and RetrievalQA):
             raise ImportError("Legacy RetrievalQA components are not available")
 
-        prompt = PromptTemplate(template=self.prompt_template_str, input_variables=["context", "question"])  # type: ignore[call-arg]
+        prompt = PromptTemplate(  # type: ignore[call-arg]
+            template=self.prompt_template_str, input_variables=["context", "question"]
+        )
         return RetrievalQA.from_chain_type(  # type: ignore[attr-defined]
             llm=self.llm,
             chain_type="stuff",
@@ -201,23 +176,21 @@ class LLMGenerator:
             chain_type_kwargs={"prompt": prompt},
         )
 
-    def _get_context_from_docs(self, docs: List[Any]) -> str:
+    def _get_context_from_docs(self, docs: list[Any]) -> str:
         """Build context string from docs, optionally truncated by WAGTAIL_RAG_MAX_CONTEXT_CHARS."""
         context = "\n\n".join(getattr(d, "page_content", "") for d in docs)
-        max_context_chars = int(getattr(settings, "WAGTAIL_RAG_MAX_CONTEXT_CHARS", 0))
-        if max_context_chars and len(context) > max_context_chars:
-            if max_context_chars <= 3:
-                return context[:max_context_chars]
-            context = context[: max_context_chars - 3] + "..."
+        max_chars = int(getattr(settings, "WAGTAIL_RAG_MAX_CONTEXT_CHARS", 0))
+        if max_chars and len(context) > max_chars:
+            context = context[: max_chars - 3] + "..." if max_chars > 3 else context[:max_chars]
         return context
 
     def _is_chat_model(self) -> bool:
-        """Detect if the LLM is a chat model based on class name and available methods."""
+        """Detect if the LLM is a chat model."""
         if LCEL_AVAILABLE and BaseChatModel and isinstance(self.llm, BaseChatModel):
             return True
-        return (
-            hasattr(self.llm, "__class__") and "Chat" in self.llm.__class__.__name__
-        ) or (hasattr(self.llm, "invoke") and not hasattr(self.llm, "generate"))
+        return "Chat" in self.llm.__class__.__name__ or (
+            hasattr(self.llm, "invoke") and not hasattr(self.llm, "generate")
+        )
 
     def _summarize_history(self, summary: str, new_messages_text: str) -> str:
         """Summarize older history turns to keep context compact."""
@@ -251,71 +224,48 @@ class LLMGenerator:
         return str(result)
 
     def _invoke_chat_model(self, prompt_text: str) -> str:
-        """Invoke a chat model (ChatOllama, ChatOpenAI, etc.) with messages."""
-        # Try with HumanMessage wrapper first
+        """Invoke a chat model (ChatOllama, ChatOpenAI, etc.) with a HumanMessage."""
         if LCEL_AVAILABLE and HumanMessage:
             try:
-                message = HumanMessage(content=prompt_text)
-                result = self.llm.invoke([message])
+                result = self.llm.invoke([HumanMessage(content=prompt_text)])
                 return self._extract_text_from_result(result)
             except Exception as e:
                 logger.debug("HumanMessage invoke failed: %s", e)
 
-        # Try direct string invoke
-        try:
-            result = self.llm.invoke(prompt_text)
-            return self._extract_text_from_result(result)
-        except Exception as e:
-            logger.debug("Direct string invoke failed: %s", e)
-
-        # Try dict format as last resort
-        try:
-            result = self.llm.invoke({"role": "user", "content": prompt_text})
-            return self._extract_text_from_result(result)
-        except Exception:
-            logger.exception("All chat model invocation methods failed")
-            raise
+        # Fallback: plain string invoke
+        result = self.llm.invoke(prompt_text)
+        return self._extract_text_from_result(result)
 
     def _invoke_regular_llm(self, prompt_text: str) -> str:
-        """Invoke a regular LLM (non-chat) with various methods."""
-        # Try direct call
-        try:
-            return str(self.llm(prompt_text))
-        except (TypeError, AttributeError) as e:
-            logger.debug("Direct call failed: %s", e)
-
-        # Try invoke method
+        """Invoke a non-chat LLM."""
         try:
             result = self.llm.invoke(prompt_text)
             return self._extract_text_from_result(result)
         except Exception as e:
             logger.debug("Invoke method failed: %s", e)
 
-        # Try generate method (legacy LangChain)
+        # Fallback: legacy generate method
         try:
             return str(self.llm.generate([prompt_text]).generations[0][0].text)
         except Exception:
-            logger.exception("All regular LLM invocation methods failed")
+            logger.exception("All LLM invocation methods failed")
             raise
 
     def generate_answer_with_llm(
         self,
         question: str,
-        docs: List[Any],
+        docs: list[Any],
         session_id: Optional[str] = None,
     ) -> str:
-        """Generate an answer by formatting a prompt and calling the raw LLM callable.
+        """Generate an answer by formatting a prompt and calling the LLM directly.
 
-        This is used as a fallback when no QA chain is available.
-        Handles both chat models (ChatOllama, ChatOpenAI, etc.) and regular LLMs.
+        Used as a fallback when no QA chain is available, and as the primary
+        path when docs are pre-retrieved (hybrid search).
         """
         context = self._get_context_from_docs(docs)
         input_text = f"Context:\n{context}\n\nQuestion:\n{question}"
-        prompt_text = self.prompt_template_str.format(
-            context=context, question=question
-        )
+        prompt_text = self.prompt_template_str.format(context=context, question=question)
 
-        # Detect if this is a chat model (expects messages, not plain strings)
         is_chat_model = self._is_chat_model()
 
         if is_chat_model and self.history_chain and session_id:
@@ -332,108 +282,45 @@ class LLMGenerator:
     def generate_answer(
         self,
         question: str,
-        docs: Optional[List[Any]] = None,
+        docs: Optional[list[Any]] = None,
         session_id: Optional[str] = None,
     ) -> str:
         """Main entry point for generating an answer.
 
-        Behavior:
-        - If docs are provided, use them directly (bypass chain's retriever) to ensure
-          we use the documents from hybrid search (vector + Wagtail).
-        - If no docs provided and a QA chain exists, use the chain (which will use its retriever).
-        - If no chain exists, docs are required.
+        If docs are provided, uses them directly so hybrid search results
+        (vector + Wagtail) are used instead of the chain's retriever.
+        If no docs provided, falls back to the QA chain.
         """
-        # If docs are provided, use them directly - don't let the chain re-retrieve
-        # This ensures we use the documents from our hybrid search (vector + Wagtail)
         if docs:
-            logger.debug(f"Using {len(docs)} pre-retrieved documents for LLM context")
-            return self.generate_answer_with_llm(
-                question,
-                docs,
-                session_id=session_id,
-            )
+            logger.debug("Using %d pre-retrieved document(s) for LLM context", len(docs))
+            return self.generate_answer_with_llm(question, docs, session_id=session_id)
 
-        # Fallback mode: no chain
         if self.qa_chain is None:
             raise ValueError("docs required when qa_chain is None")
 
-        # We have a chain but no docs - use the chain (it will use its retriever)
         if LCEL_AVAILABLE and hasattr(self.qa_chain, "invoke"):
-            # LCEL-style chain handles retrieval/internal flow
-            try:
-                out = self.qa_chain.invoke(question)
-            except Exception:
-                logger.exception("LCEL chain invocation failed")
-                raise
+            out = self.qa_chain.invoke(question)
 
-            # Normalize output to a string
             if isinstance(out, str):
                 return out
-
             if isinstance(out, dict):
-                # Try common output keys
                 for key in ("output", "text", "result", "answer"):
                     if key in out and isinstance(out[key], str):
                         return out[key]
-
-            # Try object attributes
             for attr in ("text", "output", "content"):
                 if hasattr(out, attr):
                     val = getattr(out, attr)
                     if isinstance(val, str):
                         return val
-
             if out is None:
                 raise RuntimeError("LCEL chain produced no output")
-
-            # Last resort: stringify
             return str(out)
 
         # Legacy RetrievalQA
-        # Note: docs check is redundant here since it's already handled above, but kept for safety
-        try:
-            result = self.qa_chain({"query": question})
-            if isinstance(result, dict):
-                return result.get("result") or result.get("answer") or ""
-            # Best-effort stringify
-            return str(result)
-        except Exception:
-            logger.exception("QA chain invocation failed")
-            raise
-
-    def get_source_documents_from_chain(self, question: str) -> List[Any]:
-        """Attempt to extract source documents returned by the chain (legacy RetrievalQA path).
-
-        Note: This method is currently unused but kept for potential future use.
-        The RAG chatbot uses pre-retrieved documents from hybrid search instead.
-
-        Returns a list (possibly empty) of source Document objects.
-        """
-        if self.qa_chain is None:
-            return []
-
-        # Legacy RetrievalQA returns source_documents in the result dict
-        try:
-            if not LCEL_AVAILABLE:
-                result = self.qa_chain({"query": question})
-                return result.get("source_documents", []) or []
-
-            # LCEL chains may not expose source docs in a standard way; try to invoke and inspect
-            if hasattr(self.qa_chain, "invoke"):
-                out = self.qa_chain.invoke(question)
-                if isinstance(out, dict):
-                    return (
-                        out.get("source_documents", []) or out.get("source", []) or []
-                    )
-                # Some LCEL runnables return an object with a 'source_documents' attribute
-                if hasattr(out, "source_documents"):
-                    return getattr(out, "source_documents") or []
-                if hasattr(out, "source"):
-                    return getattr(out, "source") or []
-        except Exception:
-            logger.exception("Failed to extract source documents from chain")
-
-        return []
+        result = self.qa_chain({"query": question})
+        if isinstance(result, dict):
+            return result.get("result") or result.get("answer") or ""
+        return str(result)
 
 
 __all__ = ["LLMGenerator"]
