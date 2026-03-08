@@ -9,7 +9,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="wagtail-rag",
-    version="0.1.0",
+    version="0.1.1",
     author="Wagtail RAG Contributors",
     description="A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS",
     long_description=long_description,

@@ -198,6 +198,7 @@ class RAGChatBot:
                     return FAISS.load_local(
                         folder_path=self.persist_directory,
                         embeddings=self.embeddings,
+                        index_name=self.collection_name,
                         allow_dangerous_deserialization=True,
                     )
                 except Exception as e:
