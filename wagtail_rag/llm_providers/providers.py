@@ -356,7 +356,7 @@ _factory = LLMProviderFactory()
 def get_llm(
     provider: Optional[str] = None, model_name: Optional[str] = None, **kwargs
 ) -> Any:
-    """Thin wrapper around LLMProviderFactory.get for backward compatibility."""
+    """Create and return an LLM instance for the given provider."""
     return _factory.get(provider=provider, model_name=model_name, **kwargs)
 
 

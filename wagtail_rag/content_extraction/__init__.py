@@ -10,14 +10,10 @@ from .api_fields_extractor import WagtailAPIExtractor, page_to_documents_api_ext
 from .vector_store import VectorStore
 from .index_builder import build_rag_index, get_live_pages, get_page_models
 
-# Backward-compat alias
-ChromaStore = VectorStore
-
 __all__ = [
     "page_to_documents_api_extractor",
     "WagtailAPIExtractor",
     "VectorStore",
-    "ChromaStore",
     "build_rag_index",
     "get_page_models",
     "get_live_pages",

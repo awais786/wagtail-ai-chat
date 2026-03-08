@@ -519,6 +519,4 @@ def get_vector_store(
     return cls(path=path, collection=collection, embeddings=embeddings)
 
 
-# Backward-compat aliases
 VectorStore = get_vector_store
-ChromaStore = get_vector_store

@@ -261,20 +261,9 @@ class RAGChatBot:
         base_retriever = self.vectorstore.as_retriever(search_kwargs=search_kwargs)
 
         # Use MultiQueryRetriever if available and enabled (LLM query expansion)
-        # Check new setting name first, fallback to old name for backward compatibility
         use_llm_query_expansion = getattr(
-            settings, "WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION", None
+            settings, "WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION", True
         )
-        if use_llm_query_expansion is None:
-            # Backward compatibility: check old setting name
-            use_llm_query_expansion = getattr(
-                settings, "WAGTAIL_RAG_USE_MULTI_QUERY", True
-            )
-            if use_llm_query_expansion:
-                logger.warning(
-                    "WAGTAIL_RAG_USE_MULTI_QUERY is deprecated. "
-                    "Please use WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION instead."
-                )
 
         use_multi_query = use_llm_query_expansion and MULTI_QUERY_AVAILABLE
         if use_multi_query:
