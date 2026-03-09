@@ -206,65 +206,107 @@ make clean           # remove cache and build files
 
 ## Configuration Reference
 
-### Core
+All configuration lives under a single `WAGTAIL_RAG` dict in `settings.py`. Flat `WAGTAIL_RAG_*` keys are still accepted as fallbacks for backwards compatibility.
+
+### Full example
 
 ```python
+import os
+
 WAGTAIL_RAG = {
+    # ── Embeddings ────────────────────────────────────────────────────────
     "embedding": {
         "provider": "sentence-transformers",  # "sentence-transformers" | "huggingface" | "openai"
         "model":    "all-MiniLM-L6-v2",
     },
+
+    # ── LLM ───────────────────────────────────────────────────────────────
     "llm": {
-        "provider": "ollama",  # "ollama" | "openai" | "anthropic"
-        "model":    "mistral",
+        "provider":                "ollama",   # "ollama" | "openai" | "anthropic"
+        "model":                   "mistral",
+        "max_context_chars":       0,          # max chars of context passed to LLM; 0 = unlimited
+        "enable_history":          True,       # server-side per-session chat history
+        "history_recent_messages": 6,          # recent turns kept verbatim (older turns summarised)
     },
+
+    # ── Vector store ──────────────────────────────────────────────────────
     "vector_store": {
-        "backend":    "faiss",                           # "faiss" | "chroma" | "pgvector"
-        "path":       os.path.join(BASE_DIR, "faiss_index"),
-        "collection": "wagtail_rag",
-        # "connection_string": "postgresql+psycopg2://..."  # pgvector only
+        "backend":    "faiss",                              # "faiss" | "chroma" | "pgvector"
+        "path":       os.path.join(BASE_DIR, "faiss_index"),  # directory for FAISS / ChromaDB files
+        "collection": "wagtail_rag",                        # collection / index name
+        # "connection_string": "postgresql+psycopg2://..."  # pgvector only; omit to auto-derive
     },
+
+    # ── Indexing ──────────────────────────────────────────────────────────
     "indexing": {
-        # key   = model to index
-        # value = "*" (auto-discover all fields) or ["f1", "f2"] (explicit fields)
+        "chunk_size":      1500,   # characters per chunk
+        "chunk_overlap":   100,    # overlap between consecutive chunks
+        "batch_size":      100,    # pages embedded per batch
+        "skip_if_indexed": True,   # skip pages that haven't changed since last index
+        "prune_deleted":   True,   # remove chunks for pages deleted from Wagtail
+        # key   = "app.ModelName"
+        # value = "*" (auto-discover all content fields) or ["field1", "field2"] (explicit)
         "models": {
-            "locations.LocationPage": ["introduction", "body", "address", "lat_long"],
-            "breads.BreadPage": "*",
-            "blog.BlogPage":    "*",
+            "locations.LocationPage": ["introduction", "body", "address"],
+            "breads.BreadPage":       "*",
+            "blog.BlogPage":          "*",
         },
+    },
+
+    # ── Search / retrieval ────────────────────────────────────────────────
+    "search": {
+        "k":                   8,     # chunks retrieved per query
+        "max_sources":         3,     # unique pages shown as sources in the response
+        "use_hybrid":          True,  # combine vector search + Wagtail full-text search
+        "use_query_expansion": False, # generate multiple query variants via MultiQueryRetriever
+    },
+
+    # ── API ───────────────────────────────────────────────────────────────
+    "api": {
+        "max_question_length":   150,       # max characters in a question; 0 = unlimited
+        "max_request_body_size": 1048576,   # max POST body size in bytes (default 1 MB)
+        "rate_limit_per_minute": 0,         # requests per IP per minute; 0 = disabled
     },
 }
 ```
 
-### Retrieval
+### Key settings explained
+
+| Group | Key | Default | Description |
+|---|---|---|---|
+| `embedding` | `provider` | `"huggingface"` | Embedding backend |
+| `embedding` | `model` | provider default | Model name passed to the provider |
+| `llm` | `provider` | `"ollama"` | LLM backend |
+| `llm` | `model` | provider default | Model name |
+| `llm` | `max_context_chars` | `0` | Truncate retrieved context; `0` = no limit |
+| `llm` | `enable_history` | `True` | Enable server-side chat history |
+| `llm` | `history_recent_messages` | `6` | Recent turns kept verbatim |
+| `vector_store` | `backend` | `"faiss"` | Storage backend |
+| `vector_store` | `path` | `BASE_DIR/faiss_index` | Directory for FAISS / ChromaDB |
+| `vector_store` | `collection` | `"wagtail_rag"` | Collection / index name |
+| `vector_store` | `connection_string` | derived from `DATABASES` | pgvector only |
+| `indexing` | `models` | `{}` | Models and fields to index |
+| `indexing` | `chunk_size` | `1500` | Characters per chunk |
+| `indexing` | `chunk_overlap` | `100` | Overlap between chunks |
+| `indexing` | `skip_if_indexed` | `True` | Skip unchanged pages |
+| `indexing` | `prune_deleted` | `True` | Remove stale chunks |
+| `search` | `k` | `8` | Chunks retrieved per query |
+| `search` | `max_sources` | `3` | Source pages shown in response |
+| `search` | `use_hybrid` | `True` | Vector + Wagtail full-text search |
+| `search` | `use_query_expansion` | `True` | MultiQueryRetriever query expansion |
+| `api` | `max_question_length` | `150` | Max question length; `0` = no limit |
+| `api` | `max_request_body_size` | `1048576` | Max POST body (bytes) |
+| `api` | `rate_limit_per_minute` | `0` | Per-IP rate limit; `0` = disabled |
+
+### Flat settings (backwards-compatible fallbacks)
+
+The following flat settings are still read when the corresponding grouped key is absent:
 
 ```python
-WAGTAIL_RAG_RETRIEVE_K              = 8      # documents returned per query
-WAGTAIL_RAG_USE_HYBRID_SEARCH       = True   # vector + Wagtail full-text
-WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION = False  # MultiQueryRetriever query expansion
-```
-
-### Indexing
-
-Models to index are defined by `indexing.models` inside `WAGTAIL_RAG`.
-The flat `WAGTAIL_RAG_MODELS` setting is still accepted as a fallback when `indexing.models` is not set.
-
-```python
-WAGTAIL_RAG_EXCLUDE_MODELS = ["wagtailcore.Page"]
-WAGTAIL_RAG_CHUNK_SIZE      = 1500
-WAGTAIL_RAG_CHUNK_OVERLAP   = 100
-WAGTAIL_RAG_SKIP_IF_INDEXED = True  # skip unchanged pages on re-index
-WAGTAIL_RAG_PRUNE_DELETED   = True  # remove stale chunks for deleted pages
-```
-
-### API and security
-
-```python
-WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE    = 1024 * 1024  # 1 MB POST body limit
-WAGTAIL_RAG_MAX_QUESTION_LENGTH      = 0            # 0 = no limit
-WAGTAIL_RAG_MAX_CONTEXT_CHARS        = 0            # 0 = no limit
-WAGTAIL_RAG_ENABLE_CHAT_HISTORY      = True
-WAGTAIL_RAG_CHAT_HISTORY_RECENT_MESSAGES = 6
+# Kept for existing deployments — prefer the grouped dict above
+WAGTAIL_RAG_EXCLUDE_MODELS           = ["wagtailcore.Page", "wagtailcore.Site"]
+WAGTAIL_RAG_MODELS                   = ["breads.BreadPage"]  # fallback for indexing.models
+WAGTAIL_RAG_TEST_QUESTIONS           = ["What breads do you sell?"]  # rag test questions
 ```
 
 ### pgvector (PostgreSQL)
@@ -411,7 +453,7 @@ WAGTAIL_RAG = {
 }
 ```
 
-**"No pages found to index"** — check pages are published and `WAGTAIL_RAG_MODELS` names are correct (format: `"app.ModelName"`).
+**"No pages found to index"** — check pages are published and `indexing.models` keys use the correct format (`"app.ModelName"`).
 
 **"Connection refused" (Ollama)** — run `ollama serve` first, then `ollama pull mistral`.
 
