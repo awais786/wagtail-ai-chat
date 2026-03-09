@@ -126,11 +126,15 @@ class _LLMConf:
 
     @property
     def max_context_chars(self) -> int:
-        return _get_int(self._group(), "max_context_chars", "WAGTAIL_RAG_MAX_CONTEXT_CHARS", 0)
+        return _get_int(
+            self._group(), "max_context_chars", "WAGTAIL_RAG_MAX_CONTEXT_CHARS", 0
+        )
 
     @property
     def enable_history(self) -> bool:
-        return _get_bool(self._group(), "enable_history", "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
+        return _get_bool(
+            self._group(), "enable_history", "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True
+        )
 
     @property
     def history_recent_messages(self) -> int:
@@ -201,19 +205,27 @@ class _IndexingConf:
 
     @property
     def chunk_overlap(self) -> int:
-        return _get_int(self._group(), "chunk_overlap", "WAGTAIL_RAG_CHUNK_OVERLAP", 100)
+        return _get_int(
+            self._group(), "chunk_overlap", "WAGTAIL_RAG_CHUNK_OVERLAP", 100
+        )
 
     @property
     def batch_size(self) -> int:
-        return _get_int(self._group(), "batch_size", "WAGTAIL_RAG_EMBEDDING_BATCH_SIZE", 100)
+        return _get_int(
+            self._group(), "batch_size", "WAGTAIL_RAG_EMBEDDING_BATCH_SIZE", 100
+        )
 
     @property
     def skip_if_indexed(self) -> bool:
-        return _get_bool(self._group(), "skip_if_indexed", "WAGTAIL_RAG_SKIP_IF_INDEXED", True)
+        return _get_bool(
+            self._group(), "skip_if_indexed", "WAGTAIL_RAG_SKIP_IF_INDEXED", True
+        )
 
     @property
     def prune_deleted(self) -> bool:
-        return _get_bool(self._group(), "prune_deleted", "WAGTAIL_RAG_PRUNE_DELETED", True)
+        return _get_bool(
+            self._group(), "prune_deleted", "WAGTAIL_RAG_PRUNE_DELETED", True
+        )
 
 
 class _SearchConf:
@@ -230,7 +242,9 @@ class _SearchConf:
 
     @property
     def use_hybrid(self) -> bool:
-        return _get_bool(self._group(), "use_hybrid", "WAGTAIL_RAG_USE_HYBRID_SEARCH", True)
+        return _get_bool(
+            self._group(), "use_hybrid", "WAGTAIL_RAG_USE_HYBRID_SEARCH", True
+        )
 
     @property
     def use_query_expansion(self) -> bool:

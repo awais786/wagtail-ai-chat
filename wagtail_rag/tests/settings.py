@@ -83,7 +83,7 @@ WAGTAIL_RAG = {
     "llm": {
         "provider": "ollama",
         "model": "llama2",
-        "max_context_chars": 0,   # disabled in tests (covered by test_generation.py)
+        "max_context_chars": 0,  # disabled in tests (covered by test_generation.py)
         "enable_history": True,
         "history_recent_messages": 6,
     },

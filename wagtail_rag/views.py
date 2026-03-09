@@ -36,7 +36,9 @@ _RL_MAX_IPS = 10_000  # cap memory when the server has many distinct callers
 
 def _get_client_ip(request: HttpRequest) -> str:
     xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    return xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR", "unknown")
+    return (
+        xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR", "unknown")
+    )
 
 
 def _is_rate_limited(ip: str, limit: int, window_seconds: int) -> bool:
@@ -62,7 +64,6 @@ def _is_rate_limited(ip: str, limit: int, window_seconds: int) -> bool:
 # ---------------------------------------------------------------------------
 
 _SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
-
 
 
 def _validate_metadata_filter(value) -> Optional[dict]:

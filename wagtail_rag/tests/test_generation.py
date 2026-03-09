@@ -26,7 +26,12 @@ class TestLLMGenerator(unittest.TestCase):
         base_rag = {"llm": {"provider": "ollama", "model": "llama2"}}
 
         # No truncation
-        with override_settings(WAGTAIL_RAG={**base_rag, **{"llm": {**base_rag["llm"], "max_context_chars": 0}}}):
+        with override_settings(
+            WAGTAIL_RAG={
+                **base_rag,
+                **{"llm": {**base_rag["llm"], "max_context_chars": 0}},
+            }
+        ):
             context = self.generator._get_context_from_docs([doc1, doc2])
         self.assertIn("First doc content", context)
         self.assertIn("Second doc content", context)
@@ -34,7 +39,12 @@ class TestLLMGenerator(unittest.TestCase):
         # With truncation
         doc = MagicMock()
         doc.page_content = "A" * 100
-        with override_settings(WAGTAIL_RAG={**base_rag, **{"llm": {**base_rag["llm"], "max_context_chars": 50}}}):
+        with override_settings(
+            WAGTAIL_RAG={
+                **base_rag,
+                **{"llm": {**base_rag["llm"], "max_context_chars": 50}},
+            }
+        ):
             context = self.generator._get_context_from_docs([doc])
         self.assertLessEqual(len(context), 50)
         self.assertTrue(context.endswith("..."))

@@ -10,7 +10,6 @@ Flow for each query:
 
 import logging
 
-
 try:
     from langchain.retrievers.multi_query import MultiQueryRetriever
 
