@@ -87,7 +87,7 @@ def _parse_model_fields_shorthand(model_names: Iterable[str]) -> list[str]:
 
 def _is_page_current(store: VectorStore, page, page_id: Optional[int]) -> bool:
     """Return True if the page can be skipped (already indexed and up to date)."""
-    if page_id or not getattr(settings, "WAGTAIL_RAG_SKIP_IF_INDEXED", True):
+    if page_id or not conf.indexing.skip_if_indexed:
         return False
     last_published_at = (
         page.last_published_at.isoformat()
@@ -106,7 +106,7 @@ def _prune_stale(
     stdout: WriteFn,
 ) -> None:
     """Remove chunks for pages that are no longer live."""
-    if page_id or not getattr(settings, "WAGTAIL_RAG_PRUNE_DELETED", True):
+    if page_id or not conf.indexing.prune_deleted:
         return
     deleted = store.delete_pages_not_in(live_ids, source=model_name)
     if deleted:
@@ -218,9 +218,7 @@ def build_rag_index(
     if page_id:
         _write(stdout, f"Re-indexing page ID: {page_id}")
 
-    batch_size = getattr(
-        settings, "WAGTAIL_RAG_EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE
-    )
+    batch_size = conf.indexing.batch_size
     total_docs = 0
     total_pages = 0
 

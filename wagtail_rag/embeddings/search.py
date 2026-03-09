@@ -10,7 +10,7 @@ import re
 from collections.abc import Callable
 from typing import Any, Optional
 
-from django.conf import settings
+from wagtail_rag.conf import conf
 
 try:
     from langchain_core.documents import Document  # type: ignore
@@ -363,7 +363,7 @@ class EmbeddingSearcher:
         if not (0 < len(sig_words) <= 3):
             return results
 
-        max_score = getattr(settings, "WAGTAIL_RAG_TITLE_BOOST_MAX_SCORE", None)
+        max_score = conf.search.title_boost_max_score
         title_matches: list[dict[str, Any]] = []
         other: list[dict[str, Any]] = []
 
@@ -397,7 +397,7 @@ class EmbeddingSearcher:
         retrieve_with_embeddings() instead.
         """
         if k is None:
-            k = getattr(settings, "WAGTAIL_RAG_SEARCH_K", 10)
+            k = conf.search.search_k
 
         if metadata_filter:
             raw_results = self.vectorstore.similarity_search_with_score(

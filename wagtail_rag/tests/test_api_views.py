@@ -175,6 +175,53 @@ class TestChatAPI(TestCase):
         response = rag_chat_api(request)
         self.assertEqual(response.status_code, 200)
 
+    def test_question_too_long_returns_400(self):
+        """Question exceeding WAGTAIL_RAG_MAX_QUESTION_LENGTH returns 400."""
+        request = self.factory.post(
+            "/api/rag/chat/",
+            data=json.dumps({"question": "a" * 151}),
+            content_type="application/json",
+        )
+        self.assertEqual(rag_chat_api(request).status_code, 400)
+
+    def test_question_at_max_length_accepted(self):
+        """Question exactly at the limit (150 chars) is not rejected for length alone."""
+        from unittest.mock import patch as _patch
+
+        with _patch("wagtail_rag.views.get_chatbot") as mock_gc:
+            mock_gc.return_value.query.return_value = {"answer": "ok", "sources": []}
+            request = self.factory.post(
+                "/api/rag/chat/",
+                data=json.dumps({"question": "a" * 150}),
+                content_type="application/json",
+            )
+            self.assertEqual(rag_chat_api(request).status_code, 200)
+
+    def test_invalid_session_id_returns_400(self):
+        """session_id containing path traversal or special characters returns 400."""
+        for bad_id in ["../etc/passwd", "id with spaces", "a" * 129, "<script>"]:
+            request = self.factory.post(
+                "/api/rag/chat/",
+                data=json.dumps({"question": "hi", "session_id": bad_id}),
+                content_type="application/json",
+            )
+            self.assertEqual(
+                rag_chat_api(request).status_code,
+                400,
+                msg=f"Expected 400 for session_id={bad_id!r}",
+            )
+
+    @patch("wagtail_rag.views._is_rate_limited", return_value=True)
+    def test_rate_limit_returns_429(self, _mock_rl):
+        """When the IP is rate-limited the view returns 429."""
+        with self.settings(WAGTAIL_RAG_RATE_LIMIT_PER_MINUTE=10):
+            request = self.factory.post(
+                "/api/rag/chat/",
+                data=json.dumps({"question": "hi"}),
+                content_type="application/json",
+            )
+            self.assertEqual(rag_chat_api(request).status_code, 429)
+
 
 class TestChatAPICSRF(TestCase):
     """Integration tests verifying CSRF enforcement via the Django test Client."""

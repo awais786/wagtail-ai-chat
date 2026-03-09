@@ -14,7 +14,6 @@ import logging
 import re
 from typing import List, Optional
 
-from django.conf import settings
 from django.utils.html import strip_tags
 
 from wagtail_rag.conf import conf
@@ -81,12 +80,8 @@ class WagtailAPIExtractor:
         chunk_size: Optional[int] = None,
         chunk_overlap: Optional[int] = None,
     ):
-        self.chunk_size = chunk_size or getattr(
-            settings, "WAGTAIL_RAG_CHUNK_SIZE", DEFAULT_CHUNK_SIZE
-        )
-        self.chunk_overlap = chunk_overlap or getattr(
-            settings, "WAGTAIL_RAG_CHUNK_OVERLAP", DEFAULT_CHUNK_OVERLAP
-        )
+        self.chunk_size = chunk_size or conf.indexing.chunk_size
+        self.chunk_overlap = chunk_overlap or conf.indexing.chunk_overlap
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,

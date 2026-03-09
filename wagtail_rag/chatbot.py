@@ -10,7 +10,6 @@ Flow for each query:
 
 import logging
 
-from django.conf import settings
 
 try:
     from langchain.retrievers.multi_query import MultiQueryRetriever
@@ -62,7 +61,7 @@ class RAGChatBot:
         self.llm_provider = llm_provider or conf.llm.provider
         self.model_name = model_name or conf.llm.model
         self.metadata_filter = metadata_filter or {}
-        self.k_value = getattr(settings, "WAGTAIL_RAG_RETRIEVE_K", 8)
+        self.k_value = conf.search.k
 
         embedding_provider = conf.embedding.provider
         embedding_model = conf.embedding.model
@@ -85,7 +84,7 @@ class RAGChatBot:
         )
         self.retriever = self._create_retriever()
 
-        use_hybrid = getattr(settings, "WAGTAIL_RAG_USE_HYBRID_SEARCH", True)
+        use_hybrid = conf.search.use_hybrid
         wagtail_ok = _is_wagtail_available()
         if use_hybrid and not wagtail_ok:
             logger.warning(
@@ -117,7 +116,7 @@ class RAGChatBot:
 
         base_retriever = self.vectorstore.as_retriever(search_kwargs=search_kwargs)
 
-        use_expansion = getattr(settings, "WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION", True)
+        use_expansion = conf.search.use_query_expansion
         if use_expansion and MULTI_QUERY_AVAILABLE:
             try:
                 logger.info("LLM query expansion enabled (MultiQueryRetriever)")
@@ -138,7 +137,7 @@ class RAGChatBot:
 
     def _format_sources(self, docs) -> list[dict]:
         """Return unique source pages, limited to the top MAX_SOURCES by retrieval rank."""
-        MAX_SOURCES = int(getattr(settings, "WAGTAIL_RAG_MAX_SOURCES", 3))
+        MAX_SOURCES = conf.search.max_sources
         seen = set()
         sources = []
         for doc in docs:
@@ -195,7 +194,7 @@ class RAGChatBot:
         Returns:
             {'answer': str | None, 'sources': list[dict]}
         """
-        logger.info("RAG query: %r", question)
+        logger.info("RAG query: %r", question[:200])
 
         # For follow-up questions, enrich the retrieval query with recent history
         # so vector search finds relevant docs even for vague questions.

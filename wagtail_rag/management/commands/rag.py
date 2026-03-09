@@ -22,7 +22,6 @@ import traceback
 import uuid
 from typing import Any, Optional
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandParser
 
 from wagtail_rag.content_extraction.index_builder import build_rag_index
@@ -141,9 +140,9 @@ class Command(BaseCommand):
     # ══════════════════════════════════════════════════════════════════════
 
     def _handle_index(self, options):
-        model_names = getattr(settings, "WAGTAIL_RAG_MODELS", None)
-        chunk_size = getattr(settings, "WAGTAIL_RAG_CHUNK_SIZE", 1000)
-        chunk_overlap = getattr(settings, "WAGTAIL_RAG_CHUNK_OVERLAP", 200)
+        model_names = list(conf.indexing.models.keys()) or None
+        chunk_size = conf.indexing.chunk_size
+        chunk_overlap = conf.indexing.chunk_overlap
         collection = conf.vector_store.collection
         emb_provider = conf.embedding.provider
         emb_model = conf.embedding.model
@@ -210,9 +209,9 @@ class Command(BaseCommand):
         emb_model = conf.embedding.model
         backend = conf.vector_store.backend
         collection = conf.vector_store.collection
-        use_hybrid = getattr(settings, "WAGTAIL_RAG_USE_HYBRID_SEARCH", True)
-        retrieve_k = getattr(settings, "WAGTAIL_RAG_RETRIEVE_K", 8)
-        history_in_settings = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
+        use_hybrid = conf.search.use_hybrid
+        retrieve_k = conf.search.k
+        history_in_settings = conf.llm.enable_history
         effective_history = history_in_settings and not options.get("no_history", False)
 
         self._section("Wagtail RAG — Chat")
@@ -258,7 +257,7 @@ class Command(BaseCommand):
     def _interactive_loop(
         self, chatbot, session_id, no_history, no_sources, search_only
     ):
-        history_enabled = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
+        history_enabled = conf.llm.enable_history
         use_history = history_enabled and not no_history
 
         if use_history:
@@ -341,11 +340,7 @@ class Command(BaseCommand):
     # ══════════════════════════════════════════════════════════════════════
 
     def _handle_test(self, options):
-        questions: list[str] = (
-            options.get("questions")
-            or getattr(settings, "WAGTAIL_RAG_TEST_QUESTIONS", None)
-            or DEFAULT_TEST_QUESTIONS
-        )
+        questions: list[str] = options.get("questions") or DEFAULT_TEST_QUESTIONS
         search_only: bool = options.get("search_only", False)
         metadata_filter = self._parse_filter(options.get("filter"))
 
@@ -472,7 +467,7 @@ class Command(BaseCommand):
         use_history: bool, session_id: Optional[str], search_only: bool = False
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"search_only": search_only}
-        if use_history and getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True):
+        if use_history and conf.llm.enable_history:
             kwargs["session_id"] = session_id or uuid.uuid4().hex
         return kwargs
 
