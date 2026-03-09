@@ -7,54 +7,29 @@ from unittest.mock import MagicMock, call, patch
 
 from wagtail_rag.content_extraction.index_builder import (
     _parse_model_fields_shorthand,
-    _get_fields_to_attempt,
     _upsert_in_batches,
-    _pgvector_connection_string,
 )
+from wagtail_rag.content_extraction.vector_store import _pgvector_connection_string
 
 
 class TestIndexBuilder(unittest.TestCase):
     """Test index building functions."""
 
     def test_parse_model_fields_shorthand(self):
-        """Test parsing model names with :* suffix and without."""
-        # With :* suffix
-        model_names = ["blog.BlogPage", "breads.BreadPage:*", "locations.LocationPage"]
-        cleaned, auto_fields = _parse_model_fields_shorthand(model_names)
+        """Test that :* suffix is stripped from model names."""
+        names = _parse_model_fields_shorthand(
+            ["blog.BlogPage", "breads.BreadPage:*", "locations.LocationPage"]
+        )
+        self.assertEqual(
+            names, ["blog.BlogPage", "breads.BreadPage", "locations.LocationPage"]
+        )
 
-        self.assertEqual(len(cleaned), 3)
-        self.assertIn("breads.BreadPage", cleaned)
-        self.assertIsNotNone(auto_fields)
-        self.assertIn("breads.BreadPage:*", auto_fields)
-
-        # Without :* suffix
-        model_names = ["blog.BlogPage", "breads.BreadPage"]
-        cleaned, auto_fields = _parse_model_fields_shorthand(model_names)
-        self.assertEqual(len(cleaned), 2)
-        self.assertIsNone(auto_fields)
+        # No :* — returned unchanged
+        names = _parse_model_fields_shorthand(["blog.BlogPage", "breads.BreadPage"])
+        self.assertEqual(names, ["blog.BlogPage", "breads.BreadPage"])
 
         # Empty input
-        cleaned, auto_fields = _parse_model_fields_shorthand(None)
-        self.assertEqual(cleaned, [])
-        self.assertIsNone(auto_fields)
-
-    def test_get_fields_to_attempt(self):
-        """Test field extraction with api_fields and defaults."""
-        # With api_fields
-        page = MagicMock()
-        field1, field2 = MagicMock(), MagicMock()
-        field1.name, field2.name = "body", "intro"
-        page.api_fields = [field1, field2]
-
-        fields, source = _get_fields_to_attempt(page)
-        self.assertEqual(fields, ["body", "intro"])
-        self.assertEqual(source, "model api_fields")
-
-        # Fallback to defaults
-        page.api_fields = []
-        fields, source = _get_fields_to_attempt(page)
-        self.assertEqual(fields, ["introduction", "body"])
-        self.assertEqual(source, "default fields")
+        self.assertEqual(_parse_model_fields_shorthand([]), [])
 
 
 class TestPgvectorConnectionString(unittest.TestCase):
@@ -62,12 +37,11 @@ class TestPgvectorConnectionString(unittest.TestCase):
 
     def test_explicit_setting_takes_precedence(self):
         explicit = "postgresql+psycopg2://user:pass@db:5432/mydb"
-        mock_settings = MagicMock()
-        mock_settings.WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING = explicit
 
-        with patch(
-            "wagtail_rag.content_extraction.index_builder.settings", mock_settings
-        ):
+        with patch("wagtail_rag.conf.django_settings") as mock_conf_settings:
+            mock_conf_settings.WAGTAIL_RAG = {
+                "vector_store": {"connection_string": explicit}
+            }
             result = _pgvector_connection_string()
 
         self.assertEqual(result, explicit)
@@ -87,7 +61,7 @@ class TestPgvectorConnectionString(unittest.TestCase):
         }
 
         with patch(
-            "wagtail_rag.content_extraction.index_builder.settings", mock_settings
+            "wagtail_rag.content_extraction.vector_store.settings", mock_settings
         ):
             result = _pgvector_connection_string()
 
@@ -101,7 +75,7 @@ class TestPgvectorConnectionString(unittest.TestCase):
         }
 
         with patch(
-            "wagtail_rag.content_extraction.index_builder.settings", mock_settings
+            "wagtail_rag.content_extraction.vector_store.settings", mock_settings
         ):
             with self.assertRaises(ValueError) as ctx:
                 _pgvector_connection_string()

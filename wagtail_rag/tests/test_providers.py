@@ -18,6 +18,7 @@ class TestEmbeddingProviderFactory(unittest.TestCase):
 
     def setUp(self):
         self.mock_settings = MagicMock()
+        self.mock_settings.WAGTAIL_RAG = {}
         self.factory = EmbeddingProviderFactory(self.mock_settings)
 
     def test_model_name_resolution_priority(self):
@@ -115,6 +116,7 @@ class TestLLMProviderFactory(unittest.TestCase):
 
     def setUp(self):
         self.mock_settings = MagicMock()
+        self.mock_settings.WAGTAIL_RAG = {}
         self.factory = LLMProviderFactory(self.mock_settings)
 
     def test_model_name_resolution(self):

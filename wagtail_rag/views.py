@@ -4,16 +4,20 @@ API views for RAG chatbot.
 
 import json
 import logging
+import re
+import threading
+import time
 import uuid
+from collections import deque
 from typing import Optional
 
-from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
-from .rag_chatbot import get_chatbot
+from .chatbot import get_chatbot
+from .conf import conf
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +25,45 @@ logger = logging.getLogger(__name__)
 # Arbitrary kwargs could be used to probe internals or cause unexpected behaviour.
 _ALLOWED_LLM_KWARGS = {"temperature", "max_tokens", "top_p", "top_k", "timeout"}
 
+# ---------------------------------------------------------------------------
+# Rate limiting (sliding-window, per-IP, in-memory)
+# ---------------------------------------------------------------------------
 
-def _settings_int(name: str, default: int) -> int:
-    return int(getattr(settings, name, default))
+_RL_STORE: dict[str, deque] = {}
+_RL_LOCK = threading.Lock()
+_RL_MAX_IPS = 10_000  # cap memory when the server has many distinct callers
+
+
+def _get_client_ip(request: HttpRequest) -> str:
+    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    return (
+        xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR", "unknown")
+    )
+
+
+def _is_rate_limited(ip: str, limit: int, window_seconds: int) -> bool:
+    """Return True when the IP has exceeded *limit* requests in *window_seconds*."""
+    now = time.monotonic()
+    with _RL_LOCK:
+        if ip not in _RL_STORE:
+            if len(_RL_STORE) >= _RL_MAX_IPS:
+                return False  # can't track more IPs; let it through
+            _RL_STORE[ip] = deque()
+        timestamps = _RL_STORE[ip]
+        cutoff = now - window_seconds
+        while timestamps and timestamps[0] < cutoff:
+            timestamps.popleft()
+        if len(timestamps) >= limit:
+            return True
+        timestamps.append(now)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Session-ID validation
+# ---------------------------------------------------------------------------
+
+_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
 
 
 def _validate_metadata_filter(value) -> Optional[dict]:
@@ -63,12 +103,23 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
     Response 200: {"answer": "...", "sources": [...], "session_id": "..."}
     Response 400: {"error": "..."}
     Response 413: {"error": "..."}
+    Response 415: {"error": "..."}  POST without Content-Type: application/json
     Response 500: {"error": "..."}
     """
     # Read limits at request time so settings changes take effect without restart.
-    max_body = _settings_int("WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE", 1024 * 1024)
-    max_q_len = _settings_int("WAGTAIL_RAG_MAX_QUESTION_LENGTH", 0)
-    use_history = getattr(settings, "WAGTAIL_RAG_ENABLE_CHAT_HISTORY", True)
+    max_body = conf.api.max_request_body_size
+    max_q_len = conf.api.max_question_length
+    use_history = conf.llm.enable_history
+    rate_limit = conf.api.rate_limit_per_minute
+
+    # ── rate limiting ─────────────────────────────────────────────────
+    if rate_limit:
+        ip = _get_client_ip(request)
+        if _is_rate_limited(ip, rate_limit, window_seconds=60):
+            return JsonResponse(
+                {"error": "Too many requests. Please wait before trying again."},
+                status=429,
+            )
 
     try:
         if request.method == "GET":
@@ -90,6 +141,12 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
                     pass  # treat invalid filter as no filter
 
         else:  # POST
+            ct = request.content_type or ""
+            if "application/json" not in ct:
+                return JsonResponse(
+                    {"error": "Content-Type must be application/json."},
+                    status=415,
+                )
             body = request.body
             if len(body) > max_body:
                 return JsonResponse(
@@ -135,6 +192,14 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             )
 
         # ── session ───────────────────────────────────────────────────
+        # Reject session IDs that don't match the safe pattern to prevent
+        # them from being used as injection vectors in history lookups.
+        if session_id and not _SESSION_ID_RE.match(session_id):
+            return JsonResponse(
+                {"error": "Invalid session_id format."},
+                status=400,
+            )
+
         if use_history and not session_id:
             session_id = uuid.uuid4().hex
 

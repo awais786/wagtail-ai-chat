@@ -5,10 +5,7 @@ Tests for content extraction functionality.
 import unittest
 from unittest.mock import MagicMock, patch
 
-from wagtail_rag.content_extraction.api_fields_extractor import (
-    WagtailAPIExtractor,
-    DEFAULT_FIELDS,
-)
+from wagtail_rag.content_extraction.api_fields_extractor import WagtailAPIExtractor
 
 
 class TestWagtailAPIExtractor(unittest.TestCase):
@@ -56,25 +53,18 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         self.assertEqual(extractor._clean_text(None), "")
 
     def test_resolve_candidate_fields(self):
-        """Test field resolution with api_fields and defaults."""
-        # With api_fields
+        """Test field resolution: explicit list or "*" → search_fields."""
         page = MagicMock()
-        field1, field2 = MagicMock(), MagicMock()
-        field1.name, field2.name = "body", "introduction"
-        page.api_fields = [field1, field2]
 
-        fields, source = WagtailAPIExtractor._resolve_candidate_fields(page)
-        self.assertEqual(fields, ["body", "introduction"])
-        self.assertIn("api_fields", source)
-
-        # Fallback to defaults
-        page.api_fields = []
-        with patch(
-            "wagtail_rag.content_extraction.api_fields_extractor.settings"
-        ) as mock_settings:
-            mock_settings.WAGTAIL_RAG_DEFAULT_FIELDS = DEFAULT_FIELDS
+        # "*" → uses search_fields
+        with patch.object(
+            WagtailAPIExtractor,
+            "_scan_search_fields",
+            return_value=["body", "introduction"],
+        ):
             fields, source = WagtailAPIExtractor._resolve_candidate_fields(page)
-            self.assertEqual(fields, DEFAULT_FIELDS)
+            self.assertEqual(fields, ["body", "introduction"])
+            self.assertIn("search_fields", source)
 
     def test_clean_field_text_preserves_paragraphs(self):
         """_clean_field_text should keep paragraph breaks so the splitter can use them."""
@@ -100,7 +90,7 @@ class TestWagtailAPIExtractor(unittest.TestCase):
 
     def test_extract_page_per_field_chunking(self):
         """Each field should produce its own document(s) with correct section metadata."""
-        extractor = WagtailAPIExtractor(size_threshold=10000)
+        extractor = WagtailAPIExtractor()
 
         page = MagicMock()
         page.id = 1
@@ -110,26 +100,27 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         page.last_published_at = None
         page.__class__.__name__ = "BreadPage"
 
-        field1, field2 = MagicMock(), MagicMock()
-        field1.name, field2.name = "introduction", "body"
-        page.api_fields = [field1, field2]
-
-        with patch.object(extractor, "_extract_field_value") as mock_extract:
-            mock_extract.side_effect = lambda p, name: (
-                "A short intro." if name == "introduction" else "The body content."
-            )
-            docs = extractor.extract_page(page)
+        with patch.object(
+            WagtailAPIExtractor,
+            "_scan_search_fields",
+            return_value=["introduction", "body"],
+        ):
+            with patch.object(extractor, "_extract_field_value") as mock_extract:
+                mock_extract.side_effect = lambda p, name: (
+                    "A short intro." if name == "introduction" else "The body content."
+                )
+                docs = extractor.extract_page(page)
 
         sections = [d.metadata["section"] for d in docs]
+        self.assertIn("title", sections)
         self.assertIn("introduction", sections)
         self.assertIn("body", sections)
-        # No cross-field bleed — each doc belongs to exactly one field
         for doc in docs:
-            self.assertIn(doc.metadata["section"], ("introduction", "body"))
+            self.assertIn(doc.metadata["section"], ("title", "introduction", "body"))
 
     def test_extract_page_chunk_header(self):
         """Every chunk must start with the page title and section name."""
-        extractor = WagtailAPIExtractor(size_threshold=10000)
+        extractor = WagtailAPIExtractor()
 
         page = MagicMock()
         page.id = 2
@@ -139,25 +130,23 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         page.last_published_at = None
         page.__class__.__name__ = "BreadPage"
 
-        field = MagicMock()
-        field.name = "body"
-        page.api_fields = [field]
-
         with patch.object(
-            extractor, "_extract_field_value", return_value="Some body text."
+            WagtailAPIExtractor, "_scan_search_fields", return_value=["body"]
         ):
-            docs = extractor.extract_page(page)
+            with patch.object(
+                extractor, "_extract_field_value", return_value="Some body text."
+            ):
+                docs = extractor.extract_page(page)
 
-        self.assertEqual(len(docs), 1)
-        content = docs[0].page_content
-        self.assertIn("Multigrain", content)
-        self.assertIn("body", content)
+        # title doc + body doc
+        self.assertEqual(len(docs), 2)
+        for doc in docs:
+            self.assertIn("Multigrain", doc.page_content)
+            self.assertIn(doc.metadata["section"], ("title", "body"))
 
     def test_extract_page_large_field_is_split(self):
-        """A field larger than size_threshold should produce multiple chunks."""
-        extractor = WagtailAPIExtractor(
-            chunk_size=50, chunk_overlap=0, size_threshold=60
-        )
+        """A field larger than chunk_size should produce multiple chunks."""
+        extractor = WagtailAPIExtractor(chunk_size=50, chunk_overlap=0)
 
         page = MagicMock()
         page.id = 3
@@ -167,17 +156,19 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         page.last_published_at = None
         page.__class__.__name__ = "ArticlePage"
 
-        field = MagicMock()
-        field.name = "body"
-        page.api_fields = [field]
-
         long_text = "word " * 100  # well over any threshold
-        with patch.object(extractor, "_extract_field_value", return_value=long_text):
-            docs = extractor.extract_page(page)
+        with patch.object(
+            WagtailAPIExtractor, "_scan_search_fields", return_value=["body"]
+        ):
+            with patch.object(
+                extractor, "_extract_field_value", return_value=long_text
+            ):
+                docs = extractor.extract_page(page)
 
-        self.assertGreater(len(docs), 1)
+        body_docs = [d for d in docs if d.metadata["section"] == "body"]
+        self.assertGreater(len(body_docs), 1)
         for doc in docs:
-            self.assertEqual(doc.metadata["section"], "body")
+            self.assertIn(doc.metadata["section"], ("title", "body"))
 
     def test_build_metadata(self):
         """Test metadata building for documents."""

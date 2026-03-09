@@ -57,7 +57,7 @@ index:
 	python manage.py rag index
 
 index-reset:
-	python manage.py rag index --reset-only
+	python manage.py rag index --clear
 
 index-rebuild: index-reset index
 	@echo "Index rebuilt."

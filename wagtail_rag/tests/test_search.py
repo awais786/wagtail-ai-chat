@@ -11,14 +11,8 @@ from wagtail_rag.embeddings.search import EmbeddingSearcher
 class TestHybridSearch(unittest.TestCase):
     """Test hybrid search functionality."""
 
-    @patch("wagtail_rag.embeddings.search.settings")
-    def test_hybrid_search_basic(self, mock_settings):
+    def test_hybrid_search_basic(self):
         """Test basic hybrid search with mocked components."""
-        mock_settings.WAGTAIL_RAG_VECTOR_WEIGHT = 0.5
-        mock_settings.WAGTAIL_RAG_WAGTAIL_WEIGHT = 0.5
-        mock_settings.WAGTAIL_RAG_ENABLE_HYBRID_SEARCH = True
-        mock_settings.WAGTAIL_RAG_MAX_RESULTS = 5
-
         # Mock vector store and retriever
         mock_vector_doc = MagicMock()
         mock_vector_doc.page_content = "Vector content"
@@ -48,12 +42,8 @@ class TestHybridSearch(unittest.TestCase):
         # Should have results from at least one source
         self.assertGreater(len(results), 0)
 
-    @patch("wagtail_rag.embeddings.search.settings")
-    def test_hybrid_search_disabled(self, mock_settings):
+    def test_hybrid_search_disabled(self):
         """Test hybrid search when disabled (vector-only)."""
-        mock_settings.WAGTAIL_RAG_ENABLE_HYBRID_SEARCH = False
-        mock_settings.WAGTAIL_RAG_MAX_RESULTS = 5
-
         mock_vector_doc = MagicMock()
         mock_vector_doc.page_content = "Vector content"
         mock_vector_doc.metadata = {"page_id": 1}

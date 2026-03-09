@@ -78,22 +78,36 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 # Wagtail settings
 WAGTAIL_SITE_NAME = "Test Site"
 
-# Wagtail RAG settings (test configuration)
-WAGTAIL_RAG_LLM_PROVIDER = "ollama"
-WAGTAIL_RAG_MODEL_NAME = "llama2"
-WAGTAIL_RAG_EMBEDDING_PROVIDER = "sentence-transformers"
-WAGTAIL_RAG_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-WAGTAIL_RAG_VECTOR_STORE = "faiss"
-WAGTAIL_RAG_FAISS_INDEX_PATH = os.path.join(BASE_DIR, "test_faiss_index")
-WAGTAIL_RAG_CHUNK_SIZE = 500
-WAGTAIL_RAG_CHUNK_OVERLAP = 50
-WAGTAIL_RAG_MAX_RESULTS = 5
-WAGTAIL_RAG_ENABLE_HYBRID_SEARCH = True
-WAGTAIL_RAG_VECTOR_WEIGHT = 0.7
-WAGTAIL_RAG_WAGTAIL_WEIGHT = 0.3
-WAGTAIL_RAG_ENABLE_CHAT_HISTORY = True
-WAGTAIL_RAG_MAX_CONTEXT_CHARS = 0
-WAGTAIL_RAG_DEFAULT_FIELDS = ["introduction", "body"]
+# Wagtail RAG settings
+WAGTAIL_RAG = {
+    "llm": {
+        "provider": "ollama",
+        "model": "llama2",
+        "max_context_chars": 0,  # disabled in tests (covered by test_generation.py)
+        "enable_history": True,
+        "history_recent_messages": 6,
+    },
+    "embedding": {
+        "provider": "sentence-transformers",
+        "model": "all-MiniLM-L6-v2",
+    },
+    "vector_store": {
+        "backend": "faiss",
+        "path": os.path.join(BASE_DIR, "test_faiss_index"),
+        "collection": "test_rag",
+    },
+    "indexing": {
+        "chunk_size": 500,
+        "chunk_overlap": 50,
+    },
+    "search": {
+        "k": 8,
+        "max_sources": 3,
+    },
+    "api": {
+        "max_question_length": 150,
+    },
+}
 
 # Additional test settings
 USE_TZ = True
