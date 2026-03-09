@@ -17,6 +17,8 @@ from typing import Optional
 
 from django.conf import settings
 
+from wagtail_rag.conf import conf
+
 try:
     from langchain_core.documents import Document
 except ImportError:
@@ -321,8 +323,6 @@ def _pgvector_connection_string() -> str:
     Reads WAGTAIL_RAG_PGVECTOR_CONNECTION_STRING first; falls back to
     deriving one from DATABASES['default'] (must be PostgreSQL).
     """
-    from wagtail_rag.conf import conf
-
     explicit = conf.vector_store.connection_string
     if explicit:
         return explicit
@@ -520,8 +520,6 @@ def get_vector_store(
         backend: 'faiss', 'chroma', or 'pgvector'.
                  Defaults to WAGTAIL_RAG_VECTOR_STORE_BACKEND setting.
     """
-    from wagtail_rag.conf import conf
-
     backend = (backend or conf.vector_store.backend).lower()
     cls = _BACKENDS.get(backend)
     if cls is None:

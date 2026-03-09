@@ -58,7 +58,9 @@ class TestWagtailAPIExtractor(unittest.TestCase):
 
         # "*" → uses search_fields
         with patch.object(
-            WagtailAPIExtractor, "_scan_search_fields", return_value=["body", "introduction"]
+            WagtailAPIExtractor,
+            "_scan_search_fields",
+            return_value=["body", "introduction"],
         ):
             fields, source = WagtailAPIExtractor._resolve_candidate_fields(page)
             self.assertEqual(fields, ["body", "introduction"])
@@ -99,7 +101,9 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         page.__class__.__name__ = "BreadPage"
 
         with patch.object(
-            WagtailAPIExtractor, "_scan_search_fields", return_value=["introduction", "body"]
+            WagtailAPIExtractor,
+            "_scan_search_fields",
+            return_value=["introduction", "body"],
         ):
             with patch.object(extractor, "_extract_field_value") as mock_extract:
                 mock_extract.side_effect = lambda p, name: (
@@ -156,7 +160,9 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         with patch.object(
             WagtailAPIExtractor, "_scan_search_fields", return_value=["body"]
         ):
-            with patch.object(extractor, "_extract_field_value", return_value=long_text):
+            with patch.object(
+                extractor, "_extract_field_value", return_value=long_text
+            ):
                 docs = extractor.extract_page(page)
 
         body_docs = [d for d in docs if d.metadata["section"] == "body"]

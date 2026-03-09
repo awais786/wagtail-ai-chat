@@ -28,6 +28,8 @@ Centralised settings access for Wagtail RAG.
     }
 """
 
+import os
+
 from django.conf import settings as django_settings
 
 
@@ -81,7 +83,6 @@ class _VectorStoreConf:
 
     @property
     def path(self) -> str:
-        import os
         return (
             self._group().get("path")
             or getattr(django_settings, "WAGTAIL_RAG_CHROMA_PATH", None)
@@ -125,10 +126,10 @@ class _IndexingConf:
 
 
 class _Conf:
-    embedding    = _EmbeddingConf()
-    llm          = _LLMConf()
+    embedding = _EmbeddingConf()
+    llm = _LLMConf()
     vector_store = _VectorStoreConf()
-    indexing     = _IndexingConf()
+    indexing = _IndexingConf()
 
 
 conf = _Conf()

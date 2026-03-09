@@ -31,6 +31,7 @@ from .llm_providers.generation import (
     LCEL_AVAILABLE as USE_LCEL,
 )  # noqa: F401 – re-exported
 from .conf import conf
+from .content_extraction.vector_store import get_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +103,6 @@ class RAGChatBot:
 
     def _create_vectorstore(self):
         """Load the vector store backend and return the underlying LangChain vectorstore."""
-        from wagtail_rag.content_extraction.vector_store import get_vector_store
-
         return get_vector_store(
             path=self.persist_directory,
             collection=self.collection_name,
@@ -149,7 +148,9 @@ class RAGChatBot:
             if page_id in seen:
                 continue
             seen.add(page_id)
-            sources.append({"content": doc.page_content[:200] + "...", "metadata": doc.metadata})
+            sources.append(
+                {"content": doc.page_content[:200] + "...", "metadata": doc.metadata}
+            )
         return sources
 
     def _build_retrieval_query(self, question: str, session_id: str) -> str:
@@ -165,7 +166,8 @@ class RAGChatBot:
             if not messages:
                 return question
             human_turns = [
-                m.content for m in messages
+                m.content
+                for m in messages
                 if getattr(m, "type", "") == "human" and getattr(m, "content", "")
             ]
             if not human_turns:

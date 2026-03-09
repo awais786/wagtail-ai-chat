@@ -251,8 +251,13 @@ def build_rag_index(
                     _write(stdout, "    -> Skipping (up-to-date)")
                     continue
 
-                candidate_fields, field_source = WagtailAPIExtractor._resolve_candidate_fields(page)
-                _write(stdout, f"    Fields ({field_source}): {', '.join(candidate_fields)}")
+                candidate_fields, field_source = (
+                    WagtailAPIExtractor._resolve_candidate_fields(page)
+                )
+                _write(
+                    stdout,
+                    f"    Fields ({field_source}): {', '.join(candidate_fields)}",
+                )
 
                 docs = page_to_documents_api_extractor(page)
 
@@ -261,9 +266,7 @@ def build_rag_index(
                     continue
 
                 extracted_fields = docs[0].metadata.get("extracted_fields", "title")
-                _write(
-                    stdout, f"    Chunks: {len(docs)} ({extracted_fields})"
-                )
+                _write(stdout, f"    Chunks: {len(docs)} ({extracted_fields})")
 
                 for doc in docs:
                     doc.metadata.update(

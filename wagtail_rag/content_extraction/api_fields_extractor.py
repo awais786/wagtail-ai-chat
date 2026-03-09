@@ -17,6 +17,8 @@ from typing import List, Optional
 from django.conf import settings
 from django.utils.html import strip_tags
 
+from wagtail_rag.conf import conf
+
 try:
     from langchain_core.documents import Document
 except ImportError:
@@ -35,13 +37,39 @@ MIN_FIELD_LENGTH = 10
 
 # Fields on every Wagtail page that carry no user content.
 _SKIP_FIELDS = {
-    "id", "pk", "path", "depth", "numchild", "url_path", "title", "slug",
-    "draft_title", "content_type", "content_type_id", "live",
-    "has_unpublished_changes", "owner", "locked", "locked_at", "locked_by",
-    "latest_revision", "latest_revision_id", "latest_revision_created_at",
-    "live_revision", "first_published_at", "last_published_at", "go_live_at",
-    "expire_at", "expired", "search_description", "seo_title", "show_in_menus",
-    "translation_key", "locale", "locale_id", "alias_of",
+    "id",
+    "pk",
+    "path",
+    "depth",
+    "numchild",
+    "url_path",
+    "title",
+    "slug",
+    "draft_title",
+    "content_type",
+    "content_type_id",
+    "live",
+    "has_unpublished_changes",
+    "owner",
+    "locked",
+    "locked_at",
+    "locked_by",
+    "latest_revision",
+    "latest_revision_id",
+    "latest_revision_created_at",
+    "live_revision",
+    "first_published_at",
+    "last_published_at",
+    "go_live_at",
+    "expire_at",
+    "expired",
+    "search_description",
+    "seo_title",
+    "show_in_menus",
+    "translation_key",
+    "locale",
+    "locale_id",
+    "alias_of",
 }
 
 
@@ -78,6 +106,7 @@ class WagtailAPIExtractor:
         """
         try:
             from wagtail.search.index import SearchField as WagtailSearchField
+
             return [
                 sf.field_name
                 for sf in getattr(page, "search_fields", [])
@@ -98,8 +127,6 @@ class WagtailAPIExtractor:
         - explicit list in settings → use those fields
         - "*" in settings           → use Wagtail search_fields
         """
-        from wagtail_rag.conf import conf
-
         from_settings = conf.indexing.fields_for(page)
         if from_settings:
             return from_settings, f"settings: {', '.join(from_settings)}"
@@ -200,7 +227,11 @@ class WagtailAPIExtractor:
                 continue
 
             block_type = getattr(block, "block_type", "block")
-            block_meta = {**base_metadata, "section": field_name, "block_type": block_type}
+            block_meta = {
+                **base_metadata,
+                "section": field_name,
+                "block_type": block_type,
+            }
 
             chunks = self.text_splitter.split_text(block_text)
             for i, chunk in enumerate(chunks):
@@ -292,6 +323,7 @@ class WagtailAPIExtractor:
     def _is_streamfield(page, field_name: str) -> bool:
         try:
             from wagtail.fields import StreamField
+
             field = page._meta.get_field(field_name)
             return isinstance(field, StreamField)
         except Exception:
@@ -326,12 +358,16 @@ class WagtailAPIExtractor:
 
         for field_name in candidate_fields:
             if self._is_streamfield(page, field_name):
-                field_docs = self._chunk_streamfield(page, field_name, base_metadata, title)
+                field_docs = self._chunk_streamfield(
+                    page, field_name, base_metadata, title
+                )
             else:
                 text = self._extract_field_value(page, field_name)
                 if not text or len(text.strip()) <= MIN_FIELD_LENGTH:
                     continue
-                field_docs = self._chunk_plain_field(text, field_name, base_metadata, title)
+                field_docs = self._chunk_plain_field(
+                    text, field_name, base_metadata, title
+                )
 
             if field_docs:
                 extracted_fields.append(field_name)
@@ -339,7 +375,9 @@ class WagtailAPIExtractor:
 
         if len(documents) == 1:
             logger.warning(
-                "No content extracted from %s (ID: %s)", page.__class__.__name__, page.id
+                "No content extracted from %s (ID: %s)",
+                page.__class__.__name__,
+                page.id,
             )
 
         extracted_fields_str = ", ".join(["title"] + extracted_fields)
@@ -348,7 +386,10 @@ class WagtailAPIExtractor:
 
         logger.debug(
             "Page '%s' (ID: %s): %d field(s), %d document(s)",
-            title, page.id, len(extracted_fields), len(documents),
+            title,
+            page.id,
+            len(extracted_fields),
+            len(documents),
         )
         return documents
 
