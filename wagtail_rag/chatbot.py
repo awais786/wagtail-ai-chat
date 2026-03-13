@@ -30,6 +30,7 @@ from .llm_providers.generation import (
 )  # noqa: F401 – re-exported
 from .conf import conf
 from .content_extraction.vector_store import get_vector_store
+from .prompt_guard import prompt_guard
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,13 @@ class RAGChatBot:
         Returns:
             {'answer': str | None, 'sources': list[dict]}
         """
+        # Validate and sanitize prompt before anything else
+        try:
+            question = prompt_guard.validate_prompt(question)
+        except ValueError as e:
+            logger.warning("Query blocked by PromptGuard: %s", e)
+            return {"answer": str(e), "sources": []}
+
         logger.info("RAG query: %r", question[:200])
 
         # For follow-up questions, enrich the retrieval query with recent history

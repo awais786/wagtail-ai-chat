@@ -75,12 +75,12 @@ class TestLLMGenerator(unittest.TestCase):
         self.assertIn("{question}", generator.prompt_template_str)
 
         # Injection defence — both prompt and system prompt must warn the model
-        self.assertIn("ignore", generator.prompt_template_str.lower())
-        self.assertIn("disregard", generator.system_prompt_str.lower())
+        self.assertIn("never", generator.prompt_template_str.lower())
+        self.assertIn("refuse", generator.system_prompt_str.lower())
 
-        # Structural separation — user input wrapped in XML delimiters
-        self.assertIn("<context>", generator.prompt_template_str)
-        self.assertIn("<question>", generator.prompt_template_str)
+        # Structural separation
+        self.assertIn("CONTEXT_DATA:", generator.prompt_template_str)
+        self.assertIn("USER_QUESTION:", generator.prompt_template_str)
 
     def test_sanitize_output_strips_script_tags(self):
         """_sanitize_output removes script and style blocks from LLM output."""
