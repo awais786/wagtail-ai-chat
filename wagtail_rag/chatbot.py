@@ -192,15 +192,18 @@ class RAGChatBot:
             search_only: If True, skip LLM generation and return search results only.
 
         Returns:
-            {'answer': str | None, 'sources': list[dict]}
+            A dict with at least:
+                 - 'answer': str | None
+                 - 'sources': list[dict]
+             On validation errors, an additional 'error' key is included and
+             'answer' will be None.
         """
         # Validate and sanitize prompt before anything else
         try:
             question = prompt_guard.validate_prompt(question)
         except ValueError as e:
             logger.warning("Query blocked by PromptGuard: %s", e)
-            return {"answer": str(e), "sources": []}
-
+            return {"answer": None, "sources": [], "error": str(e)}
         logger.info("RAG query: %r", question[:200])
 
         # For follow-up questions, enrich the retrieval query with recent history

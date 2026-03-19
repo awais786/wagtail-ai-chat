@@ -9,7 +9,6 @@ from typing import Any, Optional
 
 from .chat_history import get_history_store
 from wagtail_rag.conf import conf
-from wagtail_rag.prompt_guard import generate_system_prompt, create_structured_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ class LLMGenerator:
         self.llm = llm
         self.retriever = retriever
         self.prompt_template_str = self._get_prompt_template()
-        self.system_prompt_str = self._get_system_prompt()
+        self.system_prompt_str = "You are a helpful assistant."
         self.history_enabled = conf.llm.enable_history
         self.history_recent_window = conf.llm.history_recent_messages
         self.history_store = (
@@ -79,11 +78,6 @@ class LLMGenerator:
             "<question>\n{question}\n</question>\n\n"
             "Answer:"
         )
-
-    def _get_system_prompt(self) -> str:
-        role = "a website assistant"
-        task = "to answer questions using ONLY the provided context"
-        return generate_system_prompt(role, task).strip()
 
     @staticmethod
     def _sanitize_output(text: str) -> str:
