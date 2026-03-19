@@ -30,6 +30,7 @@ from .llm_providers.generation import (
 )  # noqa: F401 – re-exported
 from .conf import conf
 from .content_extraction.vector_store import get_vector_store
+from .prompt_guard import prompt_guard
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +192,18 @@ class RAGChatBot:
             search_only: If True, skip LLM generation and return search results only.
 
         Returns:
-            {'answer': str | None, 'sources': list[dict]}
+            A dict with at least:
+                 - 'answer': str | None
+                 - 'sources': list[dict]
+             On validation errors, an additional 'error' key is included and
+             'answer' will be None.
         """
+        # Validate and sanitize prompt before anything else
+        try:
+            question = prompt_guard.validate_prompt(question)
+        except ValueError as e:
+            logger.warning("Query blocked by PromptGuard: %s", e)
+            return {"answer": None, "sources": [], "error": str(e)}
         logger.info("RAG query: %r", question[:200])
 
         # For follow-up questions, enrich the retrieval query with recent history

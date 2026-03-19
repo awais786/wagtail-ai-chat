@@ -298,6 +298,20 @@ class _APIConf:
         )
 
 
+class _SecurityConf:
+    def _group(self) -> dict:
+        return _root().get("security") or {}
+
+    @property
+    def enable_prompt_guard(self) -> bool:
+        return _get_bool(
+            self._group(),
+            "enable_prompt_guard",
+            "WAGTAIL_RAG_ENABLE_PROMPT_GUARD",
+            True,
+        )
+
+
 class _Conf:
     embedding = _EmbeddingConf()
     llm = _LLMConf()
@@ -305,6 +319,7 @@ class _Conf:
     indexing = _IndexingConf()
     search = _SearchConf()
     api = _APIConf()
+    security = _SecurityConf()
 
 
 conf = _Conf()
