@@ -25,6 +25,17 @@ logger = logging.getLogger(__name__)
 # Arbitrary kwargs could be used to probe internals or cause unexpected behaviour.
 _ALLOWED_LLM_KWARGS = {"temperature", "max_tokens", "top_p", "top_k", "timeout"}
 
+# Patterns that strongly indicate prompt-injection or scanning attempts.
+# Matches are logged at WARNING level for operator visibility; the request is
+# not blocked here (the prompt_guard module handles blocking).
+_SUSPICIOUS_PATTERNS = re.compile(
+    r"\b(ignore|forget|disregard|override)\b.{0,40}"
+    r"\b(instructions?|system[\s_-]*prompt|context|guidelines?)\b"
+    r"|<\|im_start\|>\s*system"
+    r"|\bDAN\b|\bjailbreak\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # ---------------------------------------------------------------------------
 # Rate limiting (sliding-window, per-IP, in-memory)
 # ---------------------------------------------------------------------------
@@ -123,7 +134,13 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
 
     try:
         if request.method == "GET":
-            question = (request.GET.get("q") or "").strip()
+            raw_q = request.GET.get("q") or ""
+            if max_q_len and len(raw_q) > max_q_len:
+                return JsonResponse(
+                    {"error": f"Question too long (max {max_q_len} characters)."},
+                    status=400,
+                )
+            question = raw_q.strip()
             session_id = (request.GET.get("session_id") or "").strip() or None
             search_only = (request.GET.get("search_only") or "").lower() in (
                 "true",
@@ -189,6 +206,12 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             return JsonResponse(
                 {"error": f"Question too long (max {max_q_len} characters)."},
                 status=400,
+            )
+
+        if _SUSPICIOUS_PATTERNS.search(question):
+            logger.warning(
+                "rag_chat_api | suspicious pattern detected | question=%r",
+                question[:200],
             )
 
         # ── session ───────────────────────────────────────────────────

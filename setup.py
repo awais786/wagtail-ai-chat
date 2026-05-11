@@ -35,9 +35,12 @@ setup(
     ],
     python_requires=">=3.9",
     install_requires=[
-        "langchain>=0.1.0",
-        "langchain-community>=0.0.20",
-        "langchain-text-splitters>=0.0.1",
+        # >=0.2.0 required by langchain-community>=0.3.27 and langchain-text-splitters>=0.3.9
+        "langchain>=0.2.0",
+        # >=0.3.27: covers CVEs — XXE (langchain-community), SSRF and pickle
+        # deserialization (langchain-community), and XML injection (langchain-text-splitters)
+        "langchain-community>=0.3.27",
+        "langchain-text-splitters>=0.3.9",
         "beautifulsoup4>=4.12.0",
         "tiktoken>=0.5.0",
     ],
