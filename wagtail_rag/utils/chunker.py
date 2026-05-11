@@ -113,7 +113,7 @@ def paragraph_token_chunker(
                 # build overlap window (keep last sentences until overlap satisfied)
                 overlap_tokens = 0
                 new_window: List[str] = []
-                for sent in reversed[str](window):
+                for sent in reversed(window):
                     tlen = tokens_of(sent, tokenizer)
                     if overlap_tokens + tlen > overlap:
                         break
@@ -338,12 +338,12 @@ def page_to_chunks(
             # collect for canonical blob
             canonical_sections.append((field_name, field_text))
             # chunk field_text
-            chunks = list[str](
+            chunks = list(
                 paragraph_token_chunker(
                     field_text, tokenizer, chunk_size=chunk_size, overlap=overlap
                 )
             )
-            for i, chunk in enumerate[str](chunks):
+            for i, chunk in enumerate(chunks):
                 yield {
                     "text": f"Page: {title}\nSection: {field_name}\n\n{chunk}",
                     "metadata": {

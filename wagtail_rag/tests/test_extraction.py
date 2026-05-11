@@ -236,6 +236,91 @@ class TestFeatureFlagExtractor(unittest.TestCase):
             self.assertNotIn("indexer_version", doc.metadata)
             self.assertNotIn("token_count", doc.metadata)
 
+    @patch(
+        "wagtail_rag.content_extraction.api_fields_extractor.get_tokenizer_for_embedding"
+    )
+    @patch(
+        "wagtail_rag.content_extraction.api_fields_extractor.paragraph_token_chunker"
+    )
+    def test_flag_true_adds_v2_metadata(self, mock_chunker, mock_tokenizer):
+        """When flag is on, plain-field documents include token-aware metadata."""
+        mock_tok = MagicMock()
+        mock_tok.encode.return_value = [1, 2, 3]
+        mock_tokenizer.return_value = mock_tok
+        mock_chunker.return_value = ["Short intro text."]
+
+        extractor = WagtailAPIExtractor(use_token_aware_chunking=True)
+
+        page = MagicMock()
+        page.id = 11
+        page.title = "Test"
+        page.slug = "test"
+        page.full_url = "https://example.com/test/"
+        page.last_published_at = None
+        page.__class__.__name__ = "TestPage"
+
+        with patch.object(
+            WagtailAPIExtractor, "_scan_search_fields", return_value=["intro"]
+        ):
+            with patch.object(
+                extractor, "_extract_field_value", return_value="Short intro text."
+            ):
+                docs = extractor.extract_page(page)
+
+        self.assertGreater(len(docs), 1)
+        for doc in docs:
+            self.assertIn("indexer_version", doc.metadata)
+            self.assertEqual(doc.metadata["indexer_version"], "token-aware-v2-20260508")
+            self.assertIn("token_count", doc.metadata)
+            self.assertEqual(doc.metadata["token_count"], 3)
+
+    @patch(
+        "wagtail_rag.content_extraction.api_fields_extractor.get_tokenizer_for_embedding"
+    )
+    @patch(
+        "wagtail_rag.content_extraction.api_fields_extractor.paragraph_token_chunker"
+    )
+    def test_flag_true_adds_v2_metadata_for_streamfield_chunks(
+        self, mock_chunker, mock_tokenizer
+    ):
+        """Token-aware metadata is present for each chunk emitted from StreamField content."""
+        mock_tok = MagicMock()
+        mock_tok.encode.return_value = [1, 2, 3, 4]
+        mock_tokenizer.return_value = mock_tok
+        mock_chunker.return_value = ["First block text that is long enough."]
+
+        extractor = WagtailAPIExtractor(use_token_aware_chunking=True)
+
+        page = MagicMock()
+        page.id = 12
+        page.title = "Test"
+        page.slug = "test"
+        page.full_url = "https://example.com/test/"
+        page.last_published_at = None
+        page.__class__.__name__ = "TestPage"
+
+        mock_block = MagicMock()
+        mock_block.render_as_block.return_value = "First block text that is long enough."
+        mock_block.block_type = "paragraph"
+        page.body = [mock_block]
+
+        with patch.object(
+            WagtailAPIExtractor, "_scan_search_fields", return_value=["body"]
+        ):
+            with patch.object(
+                WagtailAPIExtractor, "_is_streamfield", return_value=True
+            ):
+                docs = extractor.extract_page(page)
+
+        body_docs = [d for d in docs if d.metadata["section"] == "body"]
+        self.assertEqual(len(body_docs), 1)
+        for doc in body_docs:
+            self.assertIn("indexer_version", doc.metadata)
+            self.assertEqual(doc.metadata["indexer_version"], "token-aware-v2-20260508")
+            self.assertIn("token_count", doc.metadata)
+            self.assertEqual(doc.metadata["token_count"], 4)
+            self.assertEqual(doc.metadata["chunk_kind"], "streamfield_block")
+
 
 if __name__ == "__main__":
     unittest.main()

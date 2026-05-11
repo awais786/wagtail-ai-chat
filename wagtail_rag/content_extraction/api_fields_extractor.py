@@ -28,9 +28,6 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
-# Defaults read from conf so settings drive behavior
-DEFAULT_CHUNK_SIZE = conf.indexing.chunk_size
-DEFAULT_CHUNK_OVERLAP = conf.indexing.chunk_overlap
 MIN_FIELD_LENGTH = 10
 
 # Fields on every Wagtail page that carry no user content.
@@ -80,8 +77,8 @@ class WagtailAPIExtractor:
         chunk_overlap: Optional[int] = None,
         use_token_aware_chunking: Optional[bool] = None,
     ):
-        self.chunk_size = chunk_size or DEFAULT_CHUNK_SIZE
-        self.chunk_overlap = chunk_overlap or DEFAULT_CHUNK_OVERLAP
+        self.chunk_size = chunk_size or conf.indexing.chunk_size
+        self.chunk_overlap = chunk_overlap or conf.indexing.chunk_overlap
 
         if use_token_aware_chunking is not None:
             self._use_token_aware = bool(use_token_aware_chunking)
@@ -266,16 +263,27 @@ class WagtailAPIExtractor:
                 chunks = self.text_splitter.split_text(block_text)
 
             for i, chunk in enumerate(chunks):
+                chunk_meta = {
+                    **block_meta,
+                    "chunk_index": chunk_index,
+                    "block_chunk_index": i,
+                    "total_block_chunks": len(chunks),
+                    "content_length": len(chunk),
+                }
+                if self._use_token_aware:
+                    try:
+                        chunk_meta["token_count"] = len(
+                            self.tokenizer.encode(chunk, add_special_tokens=False)
+                        )
+                    except Exception:
+                        chunk_meta["token_count"] = None
+                    chunk_meta["chunk_kind"] = "streamfield_block"
+                    chunk_meta["indexer_version"] = "token-aware-v2-20260508"
+
                 documents.append(
                     Document(
                         page_content=f"{header}{chunk}",
-                        metadata={
-                            **block_meta,
-                            "chunk_index": chunk_index,
-                            "block_chunk_index": i,
-                            "total_block_chunks": len(chunks),
-                            "content_length": len(chunk),
-                        },
+                        metadata=chunk_meta,
                     )
                 )
                 chunk_index += 1

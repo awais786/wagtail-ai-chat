@@ -38,7 +38,7 @@ deployments continue to work without changes.
             },
         },
         "search": {
-            "k":                  8,    # chunks retrieved per query
+            "k":                  10,   # chunks retrieved per query
             "max_sources":        3,    # unique pages shown as sources
             "use_hybrid":         True, # combine vector + Wagtail full-text search
             "use_query_expansion": True, # MultiQueryRetriever

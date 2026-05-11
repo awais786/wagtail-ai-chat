@@ -183,7 +183,20 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             metadata_filter = _validate_metadata_filter(data.get("filter"))
             llm_kwargs = _sanitize_llm_kwargs(data.get("llm_kwargs"))
             _tac_val = data.get("use_token_aware_chunking")
-            use_token_aware_chunking = bool(_tac_val) if _tac_val is not None else None
+            if _tac_val is None:
+                use_token_aware_chunking = None
+            elif isinstance(_tac_val, bool):
+                use_token_aware_chunking = _tac_val
+            elif isinstance(_tac_val, (int, float)):
+                use_token_aware_chunking = bool(_tac_val)
+            elif isinstance(_tac_val, str):
+                _tac_lower = _tac_val.lower()
+                use_token_aware_chunking = (
+                    True if _tac_lower in ("true", "1", "yes")
+                    else (False if _tac_lower in ("false", "0", "no") else None)
+                )
+            else:
+                use_token_aware_chunking = None
 
         # ── validate question ─────────────────────────────────────────
         if not question:
