@@ -134,7 +134,8 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
 
             _tac_raw = (request.GET.get("use_token_aware_chunking") or "").lower()
             use_token_aware_chunking: Optional[bool] = (
-                True if _tac_raw in ("true", "1", "yes")
+                True
+                if _tac_raw in ("true", "1", "yes")
                 else (False if _tac_raw in ("false", "0", "no") else None)
             )
 
@@ -182,9 +183,7 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             metadata_filter = _validate_metadata_filter(data.get("filter"))
             llm_kwargs = _sanitize_llm_kwargs(data.get("llm_kwargs"))
             _tac_val = data.get("use_token_aware_chunking")
-            use_token_aware_chunking = (
-                bool(_tac_val) if _tac_val is not None else None
-            )
+            use_token_aware_chunking = bool(_tac_val) if _tac_val is not None else None
 
         # ── validate question ─────────────────────────────────────────
         if not question:

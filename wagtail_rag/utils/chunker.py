@@ -3,17 +3,21 @@ import re
 import unicodedata
 from typing import Iterable, List, Tuple, Optional, Dict, Any
 
+
 # Tokenizer loaders (try transformers, then tiktoken fallback)
 def _load_transformers_tokenizer(model_name: str):
     try:
         from transformers import AutoTokenizer
+
         return AutoTokenizer.from_pretrained(model_name)
     except Exception:
         return None
 
+
 def _load_tiktoken_encoder(model_hint: Optional[str] = None):
     try:
         import tiktoken
+
         # prefer cl100k_base for OpenAI-like models; fallback to encoding_for_model if hint provided
         try:
             return tiktoken.get_encoding("cl100k_base")
@@ -23,6 +27,7 @@ def _load_tiktoken_encoder(model_hint: Optional[str] = None):
             return None
     except Exception:
         return None
+
 
 def get_tokenizer_for_embedding(model_name: Optional[str]) -> Any:
     """
@@ -36,10 +41,13 @@ def get_tokenizer_for_embedding(model_name: Optional[str]) -> Any:
         return tok
     enc = _load_tiktoken_encoder(model_name)
     if enc:
+
         class TiktokenAdapter:
             def encode(self, text, add_special_tokens=False):
                 return enc.encode(text or "")
+
         return TiktokenAdapter()
+
     # fallback: simple whitespace-based pseudo-tokenizer
     class SimpleTokenizer:
         def encode(self, text, add_special_tokens=False):
@@ -48,13 +56,17 @@ def get_tokenizer_for_embedding(model_name: Optional[str]) -> Any:
             words = re.findall(r"\S+", text)
             # scale factor to approximate subword tokens
             return ["w"] * max(1, int(len(words) * 1.3))
+
     return SimpleTokenizer()
 
+
 # Basic sentence splitter (replaceable with spacy/nltk)
-_SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?])\s+')
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
 
 def simple_sentence_split(text: str) -> List[str]:
     return [s.strip() for s in _SENTENCE_SPLIT_RE.split(text.strip()) if s.strip()]
+
 
 def tokens_of(text: str, tokenizer) -> int:
     try:
@@ -64,6 +76,7 @@ def tokens_of(text: str, tokenizer) -> int:
         # fallback: approximate
         words = re.findall(r"\S+", text or "")
         return max(1, int(len(words) * 1.3)) if words else 0
+
 
 def paragraph_token_chunker(
     text: str,
@@ -77,7 +90,7 @@ def paragraph_token_chunker(
     """
     if not text or not text.strip():
         return
-    paragraphs = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
+    paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
     for p in paragraphs:
         if tokens_of(p, tokenizer) <= chunk_size:
             yield p
@@ -111,6 +124,7 @@ def paragraph_token_chunker(
         if window:
             yield " ".join(window)
 
+
 # -------------------------
 # Page-level generic exporter
 # -------------------------
@@ -120,6 +134,7 @@ def _ascii_fold(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text)
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
+
 def _clean_html_preserve_paragraphs(value: Any) -> str:
     """
     Minimal HTML cleaning that preserves paragraph breaks for chunking.
@@ -127,6 +142,7 @@ def _clean_html_preserve_paragraphs(value: Any) -> str:
     """
     try:
         from django.utils.html import strip_tags
+
         text = str(value)
         text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
         text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
@@ -138,13 +154,16 @@ def _clean_html_preserve_paragraphs(value: Any) -> str:
         # fallback: plain string
         return " ".join(str(value).split())
 
+
 def _is_streamfield(page, field_name: str) -> bool:
     try:
         from wagtail.fields import StreamField
+
         field = page._meta.get_field(field_name)
         return isinstance(field, StreamField)
     except Exception:
         return False
+
 
 def _extract_streamfield_text(page, field_name: str) -> str:
     value = getattr(page, field_name, None)
@@ -166,12 +185,19 @@ def _extract_streamfield_text(page, field_name: str) -> str:
             parts.append(_clean_html_preserve_paragraphs(val))
         elif isinstance(val, dict):
             # collect string fields
-            parts.extend(_clean_html_preserve_paragraphs(v) for v in val.values() if isinstance(v, str))
+            parts.extend(
+                _clean_html_preserve_paragraphs(v)
+                for v in val.values()
+                if isinstance(v, str)
+            )
         elif isinstance(val, list):
-            parts.extend(_clean_html_preserve_paragraphs(i) for i in val if isinstance(i, str))
+            parts.extend(
+                _clean_html_preserve_paragraphs(i) for i in val if isinstance(i, str)
+            )
         else:
             parts.append(_clean_html_preserve_paragraphs(str(val)))
     return " ".join(p for p in parts if p)
+
 
 def _discover_text_fields(page) -> List[str]:
     """
@@ -179,12 +205,39 @@ def _discover_text_fields(page) -> List[str]:
     Returns list of field names and any *_search_text properties are prioritized.
     """
     skip_fields = {
-        "id","pk","path","depth","numchild","url_path","title","slug","draft_title",
-        "content_type","content_type_id","live","has_unpublished_changes","owner",
-        "locked","locked_at","locked_by","latest_revision","latest_revision_id",
-        "latest_revision_created_at","live_revision","first_published_at","last_published_at",
-        "go_live_at","expire_at","expired","search_description","seo_title","show_in_menus",
-        "translation_key","locale","locale_id","alias_of",
+        "id",
+        "pk",
+        "path",
+        "depth",
+        "numchild",
+        "url_path",
+        "title",
+        "slug",
+        "draft_title",
+        "content_type",
+        "content_type_id",
+        "live",
+        "has_unpublished_changes",
+        "owner",
+        "locked",
+        "locked_at",
+        "locked_by",
+        "latest_revision",
+        "latest_revision_id",
+        "latest_revision_created_at",
+        "live_revision",
+        "first_published_at",
+        "last_published_at",
+        "go_live_at",
+        "expire_at",
+        "expired",
+        "search_description",
+        "seo_title",
+        "show_in_menus",
+        "translation_key",
+        "locale",
+        "locale_id",
+        "alias_of",
     }
     fields = []
     # explicit *_search_text properties
@@ -199,7 +252,9 @@ def _discover_text_fields(page) -> List[str]:
             if isinstance(val, str) and val.strip():
                 fields.append(attr)
     # model concrete fields
-    for field in getattr(page._meta, "concrete_fields", []) + getattr(page._meta, "private_fields", []):
+    for field in getattr(page._meta, "concrete_fields", []) + getattr(
+        page._meta, "private_fields", []
+    ):
         name = getattr(field, "name", None)
         if not name or name in skip_fields:
             continue
@@ -219,6 +274,7 @@ def _discover_text_fields(page) -> List[str]:
             seen.add(f)
             out.append(f)
     return out
+
 
 def page_to_chunks(
     page,
@@ -282,7 +338,11 @@ def page_to_chunks(
             # collect for canonical blob
             canonical_sections.append((field_name, field_text))
             # chunk field_text
-            chunks = list[str](paragraph_token_chunker(field_text, tokenizer, chunk_size=chunk_size, overlap=overlap))
+            chunks = list[str](
+                paragraph_token_chunker(
+                    field_text, tokenizer, chunk_size=chunk_size, overlap=overlap
+                )
+            )
             for i, chunk in enumerate[str](chunks):
                 yield {
                     "text": f"Page: {title}\nSection: {field_name}\n\n{chunk}",

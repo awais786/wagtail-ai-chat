@@ -18,7 +18,10 @@ except ImportError:
 
 # Token-aware chunker — imported but only used when the feature flag is on.
 try:
-    from wagtail_rag.utils.chunker import paragraph_token_chunker, get_tokenizer_for_embedding
+    from wagtail_rag.utils.chunker import (
+        paragraph_token_chunker,
+        get_tokenizer_for_embedding,
+    )
 except Exception:
     paragraph_token_chunker = None
     get_tokenizer_for_embedding = None
@@ -101,7 +104,9 @@ class WagtailAPIExtractor:
                 )
                 self._use_token_aware = False
 
-        if self._use_token_aware and (self.tokenizer is None or paragraph_token_chunker is None):
+        if self._use_token_aware and (
+            self.tokenizer is None or paragraph_token_chunker is None
+        ):
             logger.warning(
                 "Token-aware chunking requested but dependencies are unavailable; "
                 "falling back to character-based splitter."
@@ -251,7 +256,10 @@ class WagtailAPIExtractor:
             if self._use_token_aware:
                 chunks = list(
                     paragraph_token_chunker(
-                        block_text, self.tokenizer, chunk_size=self.chunk_size, overlap=self.chunk_overlap
+                        block_text,
+                        self.tokenizer,
+                        chunk_size=self.chunk_size,
+                        overlap=self.chunk_overlap,
                     )
                 )
             else:
@@ -304,7 +312,12 @@ class WagtailAPIExtractor:
 
         if self._use_token_aware:
             chunks = list(
-                paragraph_token_chunker(text, self.tokenizer, chunk_size=self.chunk_size, overlap=self.chunk_overlap)
+                paragraph_token_chunker(
+                    text,
+                    self.tokenizer,
+                    chunk_size=self.chunk_size,
+                    overlap=self.chunk_overlap,
+                )
             )
         else:
             chunks = self.text_splitter.split_text(text)
@@ -321,7 +334,9 @@ class WagtailAPIExtractor:
             }
             if self._use_token_aware:
                 try:
-                    meta["token_count"] = len(self.tokenizer.encode(chunk, add_special_tokens=False))
+                    meta["token_count"] = len(
+                        self.tokenizer.encode(chunk, add_special_tokens=False)
+                    )
                 except Exception:
                     meta["token_count"] = None
                 meta["chunk_kind"] = "field"
@@ -334,7 +349,6 @@ class WagtailAPIExtractor:
                 )
             )
         return docs
-
 
     # -------------------------------------------------------------------------
     # Page extraction
@@ -398,7 +412,9 @@ class WagtailAPIExtractor:
         }
         if self._use_token_aware:
             try:
-                title_meta["token_count"] = len(self.tokenizer.encode(title, add_special_tokens=False))
+                title_meta["token_count"] = len(
+                    self.tokenizer.encode(title, add_special_tokens=False)
+                )
             except Exception:
                 title_meta["token_count"] = None
             title_meta["chunk_kind"] = "field"
@@ -450,7 +466,8 @@ class WagtailAPIExtractor:
 
 
 def page_to_documents_api_extractor(
-    page, use_token_aware_chunking: Optional[bool] = None,
+    page,
+    use_token_aware_chunking: Optional[bool] = None,
 ) -> List[Document]:
     """Extract LangChain Documents from a Wagtail page.
 

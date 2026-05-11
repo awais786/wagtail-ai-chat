@@ -200,8 +200,12 @@ class TestFeatureFlagExtractor(unittest.TestCase):
         extractor = WagtailAPIExtractor(use_token_aware_chunking=False)
         self.assertFalse(extractor._use_token_aware)
 
-    @patch("wagtail_rag.content_extraction.api_fields_extractor.get_tokenizer_for_embedding")
-    @patch("wagtail_rag.content_extraction.api_fields_extractor.paragraph_token_chunker")
+    @patch(
+        "wagtail_rag.content_extraction.api_fields_extractor.get_tokenizer_for_embedding"
+    )
+    @patch(
+        "wagtail_rag.content_extraction.api_fields_extractor.paragraph_token_chunker"
+    )
     def test_explicit_true_enables_token_aware(self, mock_chunker, mock_tokenizer):
         """Passing use_token_aware_chunking=True enables token-aware chunking."""
         mock_tokenizer.return_value = MagicMock()
