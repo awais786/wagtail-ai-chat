@@ -4,6 +4,9 @@ Wagtail RAG chatbox widget — include this as a partial, not a standalone page.
 Usage in base.html (typically just before </body>):
     {% include "wagtail_rag/chatbox.html" %}
 
+Feature flag — enable the token-aware chunking implementation:
+    {% include "wagtail_rag/chatbox.html" with use_token_aware_chunking="true" %}
+
 The widget renders a floating action button (bottom-right). Clicking it opens
 the chat panel. No wrapper div or positioning needed in the host template.
 
@@ -11,7 +14,7 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
     #rag-chatbox-root { --cb-primary: #your-brand-color; }
 {% endcomment %}
 
-<div id="rag-chatbox-root" data-api-url="{% url 'wagtail_rag:rag_chat_api' %}">
+<div id="rag-chatbox-root" data-api-url="{% url 'wagtail_rag:rag_chat_api' %}"{% if use_token_aware_chunking %} data-use-token-aware-chunking="{{ use_token_aware_chunking }}"{% endif %}>
   <style>
     /* Scoped to #rag-chatbox-root — does not affect the host page */
     #rag-chatbox-root {
@@ -386,6 +389,14 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
     const SESSION_KEY = 'ragChatSessionId';
     const MAX_SOURCES = 3;
 
+    /* Feature flag: token-aware chunking.
+       Set data-use-token-aware-chunking="true" on #rag-chatbox-root to enable,
+       "false" to force-disable, or omit to let the server-side setting decide. */
+    const _tacAttr = (root.dataset.useTokenAwareChunking || '').toLowerCase();
+    const USE_TOKEN_AWARE_CHUNKING = _tacAttr === 'true' ? true
+                                   : _tacAttr === 'false' ? false
+                                   : null;
+
     const fab       = document.getElementById('cb-fab');
     const panel     = document.getElementById('cb-panel');
     const msgList   = document.getElementById('cb-messages');
@@ -536,13 +547,17 @@ Theming: override CSS custom properties in your site's stylesheet, e.g.:
       showTyping();
 
       try {
+        const payload = { question: q, session_id: sessionId };
+        if (USE_TOKEN_AWARE_CHUNKING !== null) {
+          payload.use_token_aware_chunking = USE_TOKEN_AWARE_CHUNKING;
+        }
         const res = await fetch(CHAT_API, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': getCsrfToken(),
           },
-          body: JSON.stringify({ question: q, session_id: sessionId }),
+          body: JSON.stringify(payload),
         });
 
         const data = await res.json();

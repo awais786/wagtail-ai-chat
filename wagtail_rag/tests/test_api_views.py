@@ -21,6 +21,7 @@ class TestChatAPI(TestCase):
     def test_valid_post_returns_answer(self, mock_get_chatbot):
         """Valid POST with question returns 200 and answer."""
         mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
         mock_chatbot.query.return_value = {
             "answer": "Test answer",
             "sources": [{"title": "Test Page", "url": "/test/"}],
@@ -83,6 +84,7 @@ class TestChatAPI(TestCase):
     def test_session_and_filter_forwarded(self, mock_get_chatbot):
         """session_id and valid dict filter are forwarded correctly."""
         mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
         mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
         mock_get_chatbot.return_value = mock_chatbot
 
@@ -109,6 +111,7 @@ class TestChatAPI(TestCase):
     def test_llm_kwargs_sanitised(self, mock_get_chatbot):
         """Only whitelisted llm_kwargs keys are forwarded; others are stripped."""
         mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
         mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
         mock_get_chatbot.return_value = mock_chatbot
 
@@ -135,6 +138,7 @@ class TestChatAPI(TestCase):
     def test_non_dict_filter_ignored(self, mock_get_chatbot):
         """A filter value that is not a dict is silently ignored (treated as no filter)."""
         mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
         mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
         mock_get_chatbot.return_value = mock_chatbot
 
@@ -151,6 +155,7 @@ class TestChatAPI(TestCase):
     def test_chatbot_exception_returns_500(self, mock_get_chatbot):
         """Unhandled exception from chatbot returns 500 with generic message."""
         mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
         mock_chatbot.query.side_effect = Exception("boom")
         mock_get_chatbot.return_value = mock_chatbot
 
@@ -168,6 +173,7 @@ class TestChatAPI(TestCase):
     def test_get_request_accepted(self, mock_get_chatbot):
         """GET with ?q= parameter returns 200."""
         mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
         mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
         mock_get_chatbot.return_value = mock_chatbot
 
@@ -189,6 +195,7 @@ class TestChatAPI(TestCase):
         from unittest.mock import patch as _patch
 
         with _patch("wagtail_rag.views.get_chatbot") as mock_gc:
+            mock_gc.return_value.use_token_aware_chunking = False
             mock_gc.return_value.query.return_value = {"answer": "ok", "sources": []}
             request = self.factory.post(
                 "/api/rag/chat/",
@@ -230,6 +237,7 @@ class TestChatAPICSRF(TestCase):
     def test_post_without_csrf_token_rejected(self, mock_get_chatbot):
         """POST without CSRF token is rejected with 403 when enforcement is active."""
         mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
         mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
         mock_get_chatbot.return_value = mock_chatbot
 
@@ -246,6 +254,7 @@ class TestChatAPICSRF(TestCase):
     def test_post_with_csrf_token_accepted(self, mock_get_chatbot):
         """POST with valid CSRF token is accepted."""
         mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
         mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
         mock_get_chatbot.return_value = mock_chatbot
 
@@ -262,6 +271,104 @@ class TestChatAPICSRF(TestCase):
             HTTP_X_CSRFTOKEN=csrf_token.value,
         )
         self.assertEqual(response.status_code, 200)
+
+
+class TestFeatureFlagAPI(TestCase):
+    """Tests for use_token_aware_chunking feature flag in the API."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    @patch("wagtail_rag.views.get_chatbot")
+    def test_post_with_feature_flag_true(self, mock_get_chatbot):
+        """POST with use_token_aware_chunking=True forwards it to get_chatbot."""
+        mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = True
+        mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
+        mock_get_chatbot.return_value = mock_chatbot
+
+        request = self.factory.post(
+            "/api/rag/chat/",
+            data=json.dumps({"question": "hi", "use_token_aware_chunking": True}),
+            content_type="application/json",
+        )
+        response = rag_chat_api(request)
+
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertTrue(data["use_token_aware_chunking"])
+        self.assertTrue(mock_get_chatbot.call_args[1]["use_token_aware_chunking"])
+
+    @patch("wagtail_rag.views.get_chatbot")
+    def test_post_with_feature_flag_false(self, mock_get_chatbot):
+        """POST with use_token_aware_chunking=False forwards it to get_chatbot."""
+        mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
+        mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
+        mock_get_chatbot.return_value = mock_chatbot
+
+        request = self.factory.post(
+            "/api/rag/chat/",
+            data=json.dumps({"question": "hi", "use_token_aware_chunking": False}),
+            content_type="application/json",
+        )
+        response = rag_chat_api(request)
+
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertFalse(data["use_token_aware_chunking"])
+        self.assertFalse(mock_get_chatbot.call_args[1]["use_token_aware_chunking"])
+
+    @patch("wagtail_rag.views.get_chatbot")
+    def test_post_without_feature_flag_passes_none(self, mock_get_chatbot):
+        """POST without use_token_aware_chunking passes None (server default)."""
+        mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
+        mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
+        mock_get_chatbot.return_value = mock_chatbot
+
+        request = self.factory.post(
+            "/api/rag/chat/",
+            data=json.dumps({"question": "hi"}),
+            content_type="application/json",
+        )
+        rag_chat_api(request)
+
+        self.assertIsNone(mock_get_chatbot.call_args[1]["use_token_aware_chunking"])
+
+    @patch("wagtail_rag.views.get_chatbot")
+    def test_get_with_feature_flag(self, mock_get_chatbot):
+        """GET with use_token_aware_chunking=true forwards it to get_chatbot."""
+        mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = True
+        mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
+        mock_get_chatbot.return_value = mock_chatbot
+
+        request = self.factory.get(
+            "/api/rag/chat/", {"q": "hello", "use_token_aware_chunking": "true"}
+        )
+        response = rag_chat_api(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_get_chatbot.call_args[1]["use_token_aware_chunking"])
+
+    @patch("wagtail_rag.views.get_chatbot")
+    def test_response_includes_feature_flag(self, mock_get_chatbot):
+        """Response always includes use_token_aware_chunking in the payload."""
+        mock_chatbot = MagicMock()
+        mock_chatbot.use_token_aware_chunking = False
+        mock_chatbot.query.return_value = {"answer": "ok", "sources": []}
+        mock_get_chatbot.return_value = mock_chatbot
+
+        request = self.factory.post(
+            "/api/rag/chat/",
+            data=json.dumps({"question": "hi"}),
+            content_type="application/json",
+        )
+        response = rag_chat_api(request)
+
+        data = json.loads(response.content)
+        self.assertIn("use_token_aware_chunking", data)
 
 
 if __name__ == "__main__":

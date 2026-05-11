@@ -138,11 +138,11 @@ class TestWagtailAPIExtractor(unittest.TestCase):
             ):
                 docs = extractor.extract_page(page)
 
-        # title doc + body doc
-        self.assertEqual(len(docs), 2)
+        # title doc + body doc + canonical full-page blob
+        self.assertEqual(len(docs), 3)
         for doc in docs:
             self.assertIn("Multigrain", doc.page_content)
-            self.assertIn(doc.metadata["section"], ("title", "body"))
+            self.assertIn(doc.metadata["section"], ("title", "body", "full_page"))
 
     def test_extract_page_large_field_is_split(self):
         """A field larger than chunk_size should produce multiple chunks."""
@@ -185,6 +185,52 @@ class TestWagtailAPIExtractor(unittest.TestCase):
         self.assertEqual(metadata["title"], "Test Page")
         self.assertEqual(metadata["slug"], "test-page")
         self.assertEqual(metadata["url"], "https://example.com/test/")
+
+
+class TestFeatureFlagExtractor(unittest.TestCase):
+    """Tests for use_token_aware_chunking feature flag in the extractor."""
+
+    def test_default_uses_character_splitter(self):
+        """With default settings (flag=False), token-aware chunking is off."""
+        extractor = WagtailAPIExtractor()
+        self.assertFalse(extractor._use_token_aware)
+
+    def test_explicit_false_uses_character_splitter(self):
+        """Passing use_token_aware_chunking=False disables token-aware chunking."""
+        extractor = WagtailAPIExtractor(use_token_aware_chunking=False)
+        self.assertFalse(extractor._use_token_aware)
+
+    @patch("wagtail_rag.content_extraction.api_fields_extractor.get_tokenizer_for_embedding")
+    @patch("wagtail_rag.content_extraction.api_fields_extractor.paragraph_token_chunker")
+    def test_explicit_true_enables_token_aware(self, mock_chunker, mock_tokenizer):
+        """Passing use_token_aware_chunking=True enables token-aware chunking."""
+        mock_tokenizer.return_value = MagicMock()
+        extractor = WagtailAPIExtractor(use_token_aware_chunking=True)
+        self.assertTrue(extractor._use_token_aware)
+
+    def test_flag_false_no_v2_metadata(self):
+        """When flag is off, documents do NOT contain token-aware metadata."""
+        extractor = WagtailAPIExtractor(use_token_aware_chunking=False)
+
+        page = MagicMock()
+        page.id = 10
+        page.title = "Test"
+        page.slug = "test"
+        page.full_url = "https://example.com/test/"
+        page.last_published_at = None
+        page.__class__.__name__ = "TestPage"
+
+        with patch.object(
+            WagtailAPIExtractor, "_scan_search_fields", return_value=["intro"]
+        ):
+            with patch.object(
+                extractor, "_extract_field_value", return_value="Short intro text."
+            ):
+                docs = extractor.extract_page(page)
+
+        for doc in docs:
+            self.assertNotIn("indexer_version", doc.metadata)
+            self.assertNotIn("token_count", doc.metadata)
 
 
 if __name__ == "__main__":

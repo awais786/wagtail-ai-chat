@@ -54,6 +54,7 @@ class RAGChatBot:
         metadata_filter=None,
         llm_provider=None,
         llm_kwargs=None,
+        use_token_aware_chunking=None,
     ):
         self.collection_name = collection_name or conf.vector_store.collection
         self.persist_directory = persist_directory or conf.vector_store.path
@@ -61,6 +62,11 @@ class RAGChatBot:
         self.model_name = model_name or conf.llm.model
         self.metadata_filter = metadata_filter or {}
         self.k_value = conf.search.k
+
+        if use_token_aware_chunking is not None:
+            self.use_token_aware_chunking = bool(use_token_aware_chunking)
+        else:
+            self.use_token_aware_chunking = conf.indexing.use_token_aware_chunking
 
         embedding_provider = conf.embedding.provider
         embedding_model = conf.embedding.model
@@ -237,6 +243,7 @@ def get_chatbot(
     metadata_filter=None,
     llm_provider=None,
     llm_kwargs=None,
+    use_token_aware_chunking=None,
 ) -> RAGChatBot:
     """Convenience factory for RAGChatBot. All args default to settings."""
     return RAGChatBot(
@@ -245,4 +252,5 @@ def get_chatbot(
         metadata_filter=metadata_filter,
         llm_provider=llm_provider,
         llm_kwargs=llm_kwargs,
+        use_token_aware_chunking=use_token_aware_chunking,
     )

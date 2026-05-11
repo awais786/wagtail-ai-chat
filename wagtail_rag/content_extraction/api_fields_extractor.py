@@ -1,15 +1,3 @@
-"""
-Converts Wagtail pages into LangChain Documents for RAG indexing.
-
-Field resolution per page:
-  1. Explicit list in settings  → ["introduction", "body", "address"]
-  2. "*" in settings            → Wagtail search_fields (text-only, curated)
-
-Each field is chunked independently:
-  - StreamField  → per-block chunking (preserves Wagtail structure)
-  - Other fields → RecursiveCharacterTextSplitter
-"""
-
 import logging
 import re
 from typing import List, Optional
@@ -28,10 +16,18 @@ try:
 except ImportError:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
 
+# Token-aware chunker — imported but only used when the feature flag is on.
+try:
+    from wagtail_rag.utils.chunker import paragraph_token_chunker, get_tokenizer_for_embedding
+except Exception:
+    paragraph_token_chunker = None
+    get_tokenizer_for_embedding = None
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_CHUNK_SIZE = 1500
-DEFAULT_CHUNK_OVERLAP = 100
+# Defaults read from conf so settings drive behavior
+DEFAULT_CHUNK_SIZE = conf.indexing.chunk_size
+DEFAULT_CHUNK_OVERLAP = conf.indexing.chunk_overlap
 MIN_FIELD_LENGTH = 10
 
 # Fields on every Wagtail page that carry no user content.
@@ -79,14 +75,38 @@ class WagtailAPIExtractor:
         self,
         chunk_size: Optional[int] = None,
         chunk_overlap: Optional[int] = None,
+        use_token_aware_chunking: Optional[bool] = None,
     ):
-        self.chunk_size = chunk_size or conf.indexing.chunk_size
-        self.chunk_overlap = chunk_overlap or conf.indexing.chunk_overlap
+        self.chunk_size = chunk_size or DEFAULT_CHUNK_SIZE
+        self.chunk_overlap = chunk_overlap or DEFAULT_CHUNK_OVERLAP
+
+        if use_token_aware_chunking is not None:
+            self._use_token_aware = bool(use_token_aware_chunking)
+        else:
+            self._use_token_aware = conf.indexing.use_token_aware_chunking
+
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
             length_function=len,
         )
+        self.tokenizer = None
+        if self._use_token_aware and get_tokenizer_for_embedding is not None:
+            try:
+                self.tokenizer = get_tokenizer_for_embedding(conf.embedding.model)
+            except Exception:
+                logger.warning(
+                    "Token-aware chunking requested but tokenizer init failed; "
+                    "falling back to character-based splitter."
+                )
+                self._use_token_aware = False
+
+        if self._use_token_aware and (self.tokenizer is None or paragraph_token_chunker is None):
+            logger.warning(
+                "Token-aware chunking requested but dependencies are unavailable; "
+                "falling back to character-based splitter."
+            )
+            self._use_token_aware = False
 
     # -------------------------------------------------------------------------
     # Field discovery
@@ -162,7 +182,7 @@ class WagtailAPIExtractor:
         parts = [
             self._clean_text(v.source if hasattr(v, "source") else v)
             for v in data.values()
-            if isinstance(v, str) and v.strip() or hasattr(v, "source")
+            if (isinstance(v, str) and v.strip()) or hasattr(v, "source")
         ]
         return " ".join(parts)
 
@@ -170,7 +190,7 @@ class WagtailAPIExtractor:
         parts = [
             self._clean_text(item.source if hasattr(item, "source") else item)
             for item in data
-            if isinstance(item, str) and item.strip() or hasattr(item, "source")
+            if (isinstance(item, str) and item.strip()) or hasattr(item, "source")
         ]
         return " ".join(parts)
 
@@ -183,7 +203,7 @@ class WagtailAPIExtractor:
         except Exception:
             pass
 
-        value = block.value
+        value = getattr(block, "value", None)
 
         if hasattr(value, "source"):
             return self._clean_text(value.source) or None
@@ -228,7 +248,15 @@ class WagtailAPIExtractor:
                 "block_type": block_type,
             }
 
-            chunks = self.text_splitter.split_text(block_text)
+            if self._use_token_aware:
+                chunks = list(
+                    paragraph_token_chunker(
+                        block_text, self.tokenizer, chunk_size=self.chunk_size, overlap=self.chunk_overlap
+                    )
+                )
+            else:
+                chunks = self.text_splitter.split_text(block_text)
+
             for i, chunk in enumerate(chunks):
                 documents.append(
                     Document(
@@ -273,20 +301,40 @@ class WagtailAPIExtractor:
     ) -> List[Document]:
         """Chunk a plain text / RichTextField field."""
         header = f"Page: {title}\nSection: {field_name}\n\n"
-        chunks = self.text_splitter.split_text(text)
-        return [
-            Document(
-                page_content=f"{header}{chunk}",
-                metadata={
-                    **base_metadata,
-                    "section": field_name,
-                    "chunk_index": i,
-                    "total_chunks": len(chunks),
-                    "content_length": len(chunk),
-                },
+
+        if self._use_token_aware:
+            chunks = list(
+                paragraph_token_chunker(text, self.tokenizer, chunk_size=self.chunk_size, overlap=self.chunk_overlap)
             )
-            for i, chunk in enumerate(chunks)
-        ]
+        else:
+            chunks = self.text_splitter.split_text(text)
+
+        docs = []
+        for i, chunk in enumerate(chunks):
+            meta = {
+                **base_metadata,
+                "section": field_name,
+                "chunk_index": i,
+                "total_chunks": len(chunks),
+                "content_length": len(chunk),
+                "extracted_fields": field_name,
+            }
+            if self._use_token_aware:
+                try:
+                    meta["token_count"] = len(self.tokenizer.encode(chunk, add_special_tokens=False))
+                except Exception:
+                    meta["token_count"] = None
+                meta["chunk_kind"] = "field"
+                meta["indexer_version"] = "token-aware-v2-20260508"
+
+            docs.append(
+                Document(
+                    page_content=f"{header}{chunk}",
+                    metadata=meta,
+                )
+            )
+        return docs
+
 
     # -------------------------------------------------------------------------
     # Page extraction
@@ -328,7 +376,9 @@ class WagtailAPIExtractor:
         """Extract and chunk all content fields from a Wagtail page.
 
         Always includes a title document. StreamField fields are chunked
-        per-block; other fields use RecursiveCharacterTextSplitter.
+        per-block; other fields use RecursiveCharacterTextSplitter (v1) or the
+        token-aware paragraph chunker (v2) based on the
+        ``use_token_aware_chunking`` feature flag.
         """
         candidate_fields, field_source = self._resolve_candidate_fields(page)
         base_metadata = self._build_metadata(page)
@@ -338,16 +388,26 @@ class WagtailAPIExtractor:
         documents: List[Document] = []
         extracted_fields: List[str] = []
 
+        title_meta = {
+            **base_metadata,
+            "section": "title",
+            "chunk_index": 0,
+            "total_chunks": 1,
+            "content_length": len(title),
+            "extracted_fields": "title",
+        }
+        if self._use_token_aware:
+            try:
+                title_meta["token_count"] = len(self.tokenizer.encode(title, add_special_tokens=False))
+            except Exception:
+                title_meta["token_count"] = None
+            title_meta["chunk_kind"] = "field"
+            title_meta["indexer_version"] = "token-aware-v2-20260508"
+
         documents.append(
             Document(
                 page_content=f"Page: {title}\nSection: title\n\n{title}",
-                metadata={
-                    **base_metadata,
-                    "section": "title",
-                    "chunk_index": 0,
-                    "total_chunks": 1,
-                    "content_length": len(title),
-                },
+                metadata=title_meta,
             )
         )
 
@@ -389,6 +449,16 @@ class WagtailAPIExtractor:
         return documents
 
 
-def page_to_documents_api_extractor(page) -> List[Document]:
-    """Extract LangChain Documents from a Wagtail page."""
-    return WagtailAPIExtractor().extract_page(page)
+def page_to_documents_api_extractor(
+    page, use_token_aware_chunking: Optional[bool] = None,
+) -> List[Document]:
+    """Extract LangChain Documents from a Wagtail page.
+
+    Args:
+        page: A Wagtail page instance.
+        use_token_aware_chunking: Override the feature flag. ``None`` reads from
+            ``WAGTAIL_RAG["indexing"]["use_token_aware_chunking"]``.
+    """
+    return WagtailAPIExtractor(
+        use_token_aware_chunking=use_token_aware_chunking,
+    ).extract_page(page)
