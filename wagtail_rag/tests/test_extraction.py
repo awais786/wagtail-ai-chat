@@ -138,11 +138,11 @@ class TestWagtailAPIExtractor(unittest.TestCase):
             ):
                 docs = extractor.extract_page(page)
 
-        # title doc + body doc + canonical full-page blob
-        self.assertEqual(len(docs), 3)
+        # title doc + body doc
+        self.assertEqual(len(docs), 2)
         for doc in docs:
             self.assertIn("Multigrain", doc.page_content)
-            self.assertIn(doc.metadata["section"], ("title", "body", "full_page"))
+            self.assertIn(doc.metadata["section"], ("title", "body"))
 
     def test_extract_page_large_field_is_split(self):
         """A field larger than chunk_size should produce multiple chunks."""
