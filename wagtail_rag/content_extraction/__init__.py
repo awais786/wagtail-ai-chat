@@ -1,34 +1,20 @@
 """
-Content Extraction and Indexing modules for Wagtail RAG.
+Content extraction and indexing for Wagtail RAG.
 
-This package contains:
-- page_to_documents: Converts Wagtail pages to LangChain Document objects with chunking
-- index_builder: Core indexing logic for building the RAG index
+- api_fields_extractor: extracts and chunks page content into LangChain Documents
+- vector_store: VectorStore wrapper for FAISS, ChromaDB, and pgvector
+- index_builder: build_rag_index orchestration
 """
 
-# Export document conversion (converts pages to LangChain documents)
-from .page_to_documents import (
-    wagtail_page_to_documents,
-    get_page_url,
-    extract_text_from_streamfield,
-)
-
-# Export index building function
-from .index_builder import build_rag_index
-
-# Export components from index builder
-from .index_builder import get_page_models, get_live_pages, ChromaStore
+from .api_fields_extractor import WagtailAPIExtractor, page_to_documents_api_extractor
+from .vector_store import VectorStore
+from .index_builder import build_rag_index, get_live_pages, get_page_models
 
 __all__ = [
-    # Document conversion
-    'wagtail_page_to_documents',
-    'get_page_url',
-    'extract_text_from_streamfield',
-    # Index building
-    'build_rag_index',
-    # Index builder components
-    'get_page_models',
-    'get_live_pages',
-    'ChromaStore',  # Works with both ChromaDB and FAISS
+    "page_to_documents_api_extractor",
+    "WagtailAPIExtractor",
+    "VectorStore",
+    "build_rag_index",
+    "get_page_models",
+    "get_live_pages",
 ]
-

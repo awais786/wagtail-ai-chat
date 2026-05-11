@@ -1,158 +1,240 @@
 """
 API views for RAG chatbot.
-
-This module provides API endpoints for querying the RAG chatbot.
 """
+
 import json
 import logging
 import re
+import threading
+import time
+import uuid
+from collections import deque
 from typing import Optional
 
-from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
-from .rag_chatbot import get_chatbot
+from .chatbot import get_chatbot
+from .conf import conf
 
 logger = logging.getLogger(__name__)
 
-# Max POST body size (1MB) to avoid DoS from huge payloads
-MAX_REQUEST_BODY_SIZE = getattr(settings, "WAGTAIL_RAG_MAX_REQUEST_BODY_SIZE", 1024 * 1024)
+# Whitelist of llm_kwargs keys callers may send.
+# Arbitrary kwargs could be used to probe internals or cause unexpected behaviour.
+_ALLOWED_LLM_KWARGS = {"temperature", "max_tokens", "top_p", "top_k", "timeout"}
 
-# Max question length to prevent abuse
-MAX_QUESTION_LENGTH = getattr(settings, "WAGTAIL_RAG_MAX_QUESTION_LENGTH", 1000)
+# ---------------------------------------------------------------------------
+# Rate limiting (sliding-window, per-IP, in-memory)
+# ---------------------------------------------------------------------------
 
-
-def validate_question(question: str) -> tuple[bool, Optional[str]]:
-    """
-    Validate user question input.
-    
-    Args:
-        question: User question string
-        
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
-    if not question or not question.strip():
-        return False, "Question cannot be empty"
-    
-    if len(question) > MAX_QUESTION_LENGTH:
-        return False, f"Question too long (max {MAX_QUESTION_LENGTH} characters)"
-    
-    # Check for suspicious patterns (basic protection)
-    # Note: LLM providers have their own prompt injection protection
-    suspicious_patterns = [
-        r'<script[^>]*>',  # Script tags
-        r'javascript:',     # JavaScript URLs
-        r'on\w+\s*=',      # Event handlers
-    ]
-    
-    for pattern in suspicious_patterns:
-        if re.search(pattern, question, re.IGNORECASE):
-            logger.warning(f"Suspicious pattern detected in question: {pattern}")
-            # Don't reject, just log - LLM will handle safely
-    
-    return True, None
+_RL_STORE: dict[str, deque] = {}
+_RL_LOCK = threading.Lock()
+_RL_MAX_IPS = 10_000  # cap memory when the server has many distinct callers
 
 
+def _get_client_ip(request: HttpRequest) -> str:
+    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    return (
+        xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR", "unknown")
+    )
 
-@csrf_exempt
+
+def _is_rate_limited(ip: str, limit: int, window_seconds: int) -> bool:
+    """Return True when the IP has exceeded *limit* requests in *window_seconds*."""
+    now = time.monotonic()
+    with _RL_LOCK:
+        if ip not in _RL_STORE:
+            if len(_RL_STORE) >= _RL_MAX_IPS:
+                return False  # can't track more IPs; let it through
+            _RL_STORE[ip] = deque()
+        timestamps = _RL_STORE[ip]
+        cutoff = now - window_seconds
+        while timestamps and timestamps[0] < cutoff:
+            timestamps.popleft()
+        if len(timestamps) >= limit:
+            return True
+        timestamps.append(now)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Session-ID validation
+# ---------------------------------------------------------------------------
+
+_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
+
+
+def _validate_metadata_filter(value) -> Optional[dict]:
+    """Return value if it is a non-empty dict, otherwise None."""
+    if isinstance(value, dict) and value:
+        return value
+    return None
+
+
+def _sanitize_llm_kwargs(raw) -> dict:
+    """Strip any keys not in _ALLOWED_LLM_KWARGS."""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k in _ALLOWED_LLM_KWARGS}
+
+
+@ensure_csrf_cookie
 @require_http_methods(["GET", "POST"])
 def rag_chat_api(request: HttpRequest) -> JsonResponse:
     """
-    API endpoint for RAG chatbot queries.
+    Chat API endpoint.
 
-    CSRF is exempt because this endpoint is intended for programmatic use (e.g. external
-    clients, scripts, or non-Django frontends) that do not send Django's CSRF token.
-    Protect the endpoint at the network/gateway level (e.g. auth, rate limiting) if needed.
+    CSRF protection is enforced for POST requests — the client must include the
+    Django CSRF token either as the X-CSRFToken request header or as the
+    csrfmiddlewaretoken POST field.  GET requests are CSRF-safe by definition.
 
-    Supports both GET and POST methods for browser-based access.
+    The embedded chatbox widget reads the csrftoken cookie and sends it
+    automatically.  External / programmatic clients should first GET any page
+    (which sets the cookie via ensure_csrf_cookie) and then mirror the token.
 
-    GET parameters:
-        q: Question (required)
-        filter: JSON string for metadata filter (optional, e.g., '{"model": "BreadPage"}')
+    Protect this endpoint at the network level (auth, rate limiting) if it is
+    publicly exposed.
 
-    POST data:
-    {
-        "question": "What types of bread do you have?",
-        "filter": {"model": "BreadPage"},  # optional metadata filter
-        "llm_kwargs": {"temperature": 0.7}  # optional LLM-specific parameters
-    }
+    GET  ?q=<question>[&session_id=<id>][&filter=<json>][&search_only=true]
+    POST {"question": "...", "session_id": "...", "filter": {}, "llm_kwargs": {}, "search_only": false}
 
-    Note: LLM provider and model come from Django settings (WAGTAIL_RAG_LLM_PROVIDER, WAGTAIL_RAG_MODEL_NAME)
-
-    Returns:
-    {
-        "answer": "...",
-        "sources": [...]
-    }
+    Response 200: {"answer": "...", "sources": [...], "session_id": "..."}
+    Response 400: {"error": "..."}
+    Response 413: {"error": "..."}
+    Response 415: {"error": "..."}  POST without Content-Type: application/json
+    Response 500: {"error": "..."}
     """
+    # Read limits at request time so settings changes take effect without restart.
+    max_body = conf.api.max_request_body_size
+    max_q_len = conf.api.max_question_length
+    use_history = conf.llm.enable_history
+    rate_limit = conf.api.rate_limit_per_minute
+
+    # ── rate limiting ─────────────────────────────────────────────────
+    if rate_limit:
+        ip = _get_client_ip(request)
+        if _is_rate_limited(ip, rate_limit, window_seconds=60):
+            return JsonResponse(
+                {"error": "Too many requests. Please wait before trying again."},
+                status=429,
+            )
+
     try:
         if request.method == "GET":
             question = (request.GET.get("q") or "").strip()
+            session_id = (request.GET.get("session_id") or "").strip() or None
+            search_only = (request.GET.get("search_only") or "").lower() in (
+                "true",
+                "1",
+                "yes",
+            )
+            llm_kwargs: dict = {}
+
             filter_str = request.GET.get("filter", "")
             metadata_filter: Optional[dict] = None
             if filter_str:
                 try:
-                    metadata_filter = json.loads(filter_str)
-                except json.JSONDecodeError:
-                    metadata_filter = None
-            llm_kwargs: dict = {}
-        else:
-            body = request.body
-            if len(body) > MAX_REQUEST_BODY_SIZE:
+                    metadata_filter = _validate_metadata_filter(json.loads(filter_str))
+                except (json.JSONDecodeError, ValueError):
+                    pass  # treat invalid filter as no filter
+
+        else:  # POST
+            ct = request.content_type or ""
+            if "application/json" not in ct:
                 return JsonResponse(
-                    {"error": f"Request body too large (max {MAX_REQUEST_BODY_SIZE} bytes)."},
+                    {"error": "Content-Type must be application/json."},
+                    status=415,
+                )
+            body = request.body
+            if len(body) > max_body:
+                return JsonResponse(
+                    {"error": f"Request body too large (max {max_body} bytes)."},
                     status=413,
                 )
             if not body or not body.strip():
                 return JsonResponse(
-                    {"error": "POST body must be non-empty JSON with a 'question' field."},
+                    {
+                        "error": "POST body must be non-empty JSON with a 'question' field."
+                    },
                     status=400,
                 )
             try:
                 data = json.loads(body)
-            except json.JSONDecodeError as e:
-                return JsonResponse({"error": f"Invalid JSON: {e}"}, status=400)
+            except json.JSONDecodeError as exc:
+                return JsonResponse({"error": f"Invalid JSON: {exc}"}, status=400)
+
+            if not isinstance(data, dict):
+                return JsonResponse(
+                    {"error": "POST body must be a JSON object."}, status=400
+                )
+
             question = (data.get("question") or "").strip()
-            metadata_filter = data.get("filter")
-            llm_kwargs = data.get("llm_kwargs") or {}
+            session_id = (data.get("session_id") or "").strip() or None
+            search_only = bool(data.get("search_only", False))
+            metadata_filter = _validate_metadata_filter(data.get("filter"))
+            llm_kwargs = _sanitize_llm_kwargs(data.get("llm_kwargs"))
 
-        # Validate question input
-        is_valid, error_msg = validate_question(question)
-        if not is_valid:
-            return JsonResponse({"error": error_msg}, status=400)
+        # ── validate question ─────────────────────────────────────────
+        if not question:
+            return JsonResponse(
+                {
+                    "error": "Question is required. Use 'q' for GET or 'question' for POST."
+                },
+                status=400,
+            )
 
-        llm_provider = getattr(settings, "WAGTAIL_RAG_LLM_PROVIDER", "ollama")
-        llm_model = getattr(settings, "WAGTAIL_RAG_MODEL_NAME", None) or "default"
+        if max_q_len and len(question) > max_q_len:
+            return JsonResponse(
+                {"error": f"Question too long (max {max_q_len} characters)."},
+                status=400,
+            )
 
+        # ── session ───────────────────────────────────────────────────
+        # Reject session IDs that don't match the safe pattern to prevent
+        # them from being used as injection vectors in history lookups.
+        if session_id and not _SESSION_ID_RE.match(session_id):
+            return JsonResponse(
+                {"error": "Invalid session_id format."},
+                status=400,
+            )
+
+        if use_history and not session_id:
+            session_id = uuid.uuid4().hex
+
+        # ── query ─────────────────────────────────────────────────────
         logger.info(
-            "wagtail_rag.chat API called | question=%r | llm=%s/%s",
+            "rag_chat_api | question=%r | search_only=%s | session=%s",
             question[:200],
-            llm_provider,
-            llm_model,
+            search_only,
+            session_id,
         )
 
-        chatbot = get_chatbot(metadata_filter=metadata_filter, llm_kwargs=llm_kwargs)
-        result = chatbot.query(question)
+        chatbot = get_chatbot(
+            metadata_filter=metadata_filter,
+            llm_kwargs=llm_kwargs if llm_kwargs else {},
+        )
+        result = chatbot.query(question, session_id=session_id, search_only=search_only)
+
+        if use_history and session_id:
+            result["session_id"] = session_id
+
         return JsonResponse(result)
 
-    except ValueError as e:
-        # Configuration or input validation errors
-        logger.warning("RAG chat API validation error: %s", str(e))
-        return JsonResponse({"error": f"Invalid input: {str(e)}"}, status=400)
-    except ImportError as e:
-        # Missing dependencies
-        logger.error("RAG chat API dependency error: %s", str(e))
-        return JsonResponse({"error": "Service configuration error. Please contact support."}, status=500)
     except Exception:
-        # Unexpected errors - log details but return generic message
-        logger.exception("RAG chat API unexpected error")
-        return JsonResponse({"error": "An unexpected error occurred. Please try again later."}, status=500)
+        logger.exception("RAG chat API error")
+        return JsonResponse(
+            {"error": "An error occurred processing your request."},
+            status=500,
+        )
 
 
+@ensure_csrf_cookie
 def rag_chatbox_widget(request: HttpRequest) -> HttpResponse:
-    """Serve the RAG chatbox widget HTML page."""
+    """Serve the RAG chatbox widget as a standalone page (for testing).
+
+    @ensure_csrf_cookie guarantees the csrftoken cookie is set on this response
+    so the embedded JS can read it for subsequent POST requests.
+    """
     return render(request, "wagtail_rag/chatbox.html")
