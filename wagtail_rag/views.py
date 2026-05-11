@@ -1,192 +1,240 @@
 """
 API views for RAG chatbot.
-
-This module provides API endpoints for querying the RAG chatbot.
 """
+
 import json
 import logging
+import re
+import threading
+import time
+import uuid
+from collections import deque
+from typing import Optional
 
-from django.conf import settings
-from django.http import JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
-from .rag_chatbot import get_chatbot
+from .chatbot import get_chatbot
+from .conf import conf
 
 logger = logging.getLogger(__name__)
 
+# Whitelist of llm_kwargs keys callers may send.
+# Arbitrary kwargs could be used to probe internals or cause unexpected behaviour.
+_ALLOWED_LLM_KWARGS = {"temperature", "max_tokens", "top_p", "top_k", "timeout"}
 
-@csrf_exempt
+# ---------------------------------------------------------------------------
+# Rate limiting (sliding-window, per-IP, in-memory)
+# ---------------------------------------------------------------------------
+
+_RL_STORE: dict[str, deque] = {}
+_RL_LOCK = threading.Lock()
+_RL_MAX_IPS = 10_000  # cap memory when the server has many distinct callers
+
+
+def _get_client_ip(request: HttpRequest) -> str:
+    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    return (
+        xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR", "unknown")
+    )
+
+
+def _is_rate_limited(ip: str, limit: int, window_seconds: int) -> bool:
+    """Return True when the IP has exceeded *limit* requests in *window_seconds*."""
+    now = time.monotonic()
+    with _RL_LOCK:
+        if ip not in _RL_STORE:
+            if len(_RL_STORE) >= _RL_MAX_IPS:
+                return False  # can't track more IPs; let it through
+            _RL_STORE[ip] = deque()
+        timestamps = _RL_STORE[ip]
+        cutoff = now - window_seconds
+        while timestamps and timestamps[0] < cutoff:
+            timestamps.popleft()
+        if len(timestamps) >= limit:
+            return True
+        timestamps.append(now)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Session-ID validation
+# ---------------------------------------------------------------------------
+
+_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
+
+
+def _validate_metadata_filter(value) -> Optional[dict]:
+    """Return value if it is a non-empty dict, otherwise None."""
+    if isinstance(value, dict) and value:
+        return value
+    return None
+
+
+def _sanitize_llm_kwargs(raw) -> dict:
+    """Strip any keys not in _ALLOWED_LLM_KWARGS."""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k in _ALLOWED_LLM_KWARGS}
+
+
+@ensure_csrf_cookie
 @require_http_methods(["GET", "POST"])
-def rag_chat_api(request):
+def rag_chat_api(request: HttpRequest) -> JsonResponse:
     """
-    API endpoint for RAG chatbot queries.
-    
-    Supports both GET and POST methods for browser-based access.
-    
-    GET parameters:
-        q: Question (required)
-        filter: JSON string for metadata filter (optional, e.g., '{"model": "BreadPage"}')
-    
-    POST data:
-    {
-        "question": "What types of bread do you have?",
-        "filter": {"model": "BreadPage"},  # optional metadata filter
-        "llm_kwargs": {"temperature": 0.7}  # optional LLM-specific parameters
-    }
-    
-    Note: LLM provider and model come from Django settings (WAGTAIL_RAG_LLM_PROVIDER, WAGTAIL_RAG_MODEL_NAME)
-    
-    Returns:
-    {
-        "answer": "...",
-        "sources": [...]
-    }
+    Chat API endpoint.
+
+    CSRF protection is enforced for POST requests — the client must include the
+    Django CSRF token either as the X-CSRFToken request header or as the
+    csrfmiddlewaretoken POST field.  GET requests are CSRF-safe by definition.
+
+    The embedded chatbox widget reads the csrftoken cookie and sends it
+    automatically.  External / programmatic clients should first GET any page
+    (which sets the cookie via ensure_csrf_cookie) and then mirror the token.
+
+    Protect this endpoint at the network level (auth, rate limiting) if it is
+    publicly exposed.
+
+    GET  ?q=<question>[&session_id=<id>][&filter=<json>][&search_only=true]
+    POST {"question": "...", "session_id": "...", "filter": {}, "llm_kwargs": {}, "search_only": false}
+
+    Response 200: {"answer": "...", "sources": [...], "session_id": "..."}
+    Response 400: {"error": "..."}
+    Response 413: {"error": "..."}
+    Response 415: {"error": "..."}  POST without Content-Type: application/json
+    Response 500: {"error": "..."}
     """
+    # Read limits at request time so settings changes take effect without restart.
+    max_body = conf.api.max_request_body_size
+    max_q_len = conf.api.max_question_length
+    use_history = conf.llm.enable_history
+    rate_limit = conf.api.rate_limit_per_minute
+
+    # ── rate limiting ─────────────────────────────────────────────────
+    if rate_limit:
+        ip = _get_client_ip(request)
+        if _is_rate_limited(ip, rate_limit, window_seconds=60):
+            return JsonResponse(
+                {"error": "Too many requests. Please wait before trying again."},
+                status=429,
+            )
+
     try:
-        # Handle both GET and POST
-        if request.method == 'GET':
-            question = request.GET.get('q', '').strip()
-            filter_str = request.GET.get('filter', '')
-            metadata_filter = None
+        if request.method == "GET":
+            question = (request.GET.get("q") or "").strip()
+            session_id = (request.GET.get("session_id") or "").strip() or None
+            search_only = (request.GET.get("search_only") or "").lower() in (
+                "true",
+                "1",
+                "yes",
+            )
+            llm_kwargs: dict = {}
+
+            filter_str = request.GET.get("filter", "")
+            metadata_filter: Optional[dict] = None
             if filter_str:
                 try:
-                    metadata_filter = json.loads(filter_str)
-                except json.JSONDecodeError:
-                    metadata_filter = None
-            llm_kwargs = {}
-        else:  # POST
-            data = json.loads(request.body)
-            question = data.get('question', '').strip()
-            metadata_filter = data.get('filter')  # Optional metadata filter
-            llm_kwargs = data.get('llm_kwargs', {})  # Optional LLM-specific kwargs
-        
-        if not question:
-            return JsonResponse({'error': 'Question is required. Use "q" parameter for GET or "question" for POST.'}, status=400)
-        
-        # Use settings for LLM provider and model - no need to pass them in request
-        llm_provider = getattr(settings, 'WAGTAIL_RAG_LLM_PROVIDER', 'ollama')
-        llm_model = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None) or 'default'
+                    metadata_filter = _validate_metadata_filter(json.loads(filter_str))
+                except (json.JSONDecodeError, ValueError):
+                    pass  # treat invalid filter as no filter
 
-        logger.warning(
-            "wagtail_rag.chat API called | question=%r | llm=%s/%s",
-            question,
-            llm_provider,
-            llm_model,
+        else:  # POST
+            ct = request.content_type or ""
+            if "application/json" not in ct:
+                return JsonResponse(
+                    {"error": "Content-Type must be application/json."},
+                    status=415,
+                )
+            body = request.body
+            if len(body) > max_body:
+                return JsonResponse(
+                    {"error": f"Request body too large (max {max_body} bytes)."},
+                    status=413,
+                )
+            if not body or not body.strip():
+                return JsonResponse(
+                    {
+                        "error": "POST body must be non-empty JSON with a 'question' field."
+                    },
+                    status=400,
+                )
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError as exc:
+                return JsonResponse({"error": f"Invalid JSON: {exc}"}, status=400)
+
+            if not isinstance(data, dict):
+                return JsonResponse(
+                    {"error": "POST body must be a JSON object."}, status=400
+                )
+
+            question = (data.get("question") or "").strip()
+            session_id = (data.get("session_id") or "").strip() or None
+            search_only = bool(data.get("search_only", False))
+            metadata_filter = _validate_metadata_filter(data.get("filter"))
+            llm_kwargs = _sanitize_llm_kwargs(data.get("llm_kwargs"))
+
+        # ── validate question ─────────────────────────────────────────
+        if not question:
+            return JsonResponse(
+                {
+                    "error": "Question is required. Use 'q' for GET or 'question' for POST."
+                },
+                status=400,
+            )
+
+        if max_q_len and len(question) > max_q_len:
+            return JsonResponse(
+                {"error": f"Question too long (max {max_q_len} characters)."},
+                status=400,
+            )
+
+        # ── session ───────────────────────────────────────────────────
+        # Reject session IDs that don't match the safe pattern to prevent
+        # them from being used as injection vectors in history lookups.
+        if session_id and not _SESSION_ID_RE.match(session_id):
+            return JsonResponse(
+                {"error": "Invalid session_id format."},
+                status=400,
+            )
+
+        if use_history and not session_id:
+            session_id = uuid.uuid4().hex
+
+        # ── query ─────────────────────────────────────────────────────
+        logger.info(
+            "rag_chat_api | question=%r | search_only=%s | session=%s",
+            question[:200],
+            search_only,
+            session_id,
         )
 
         chatbot = get_chatbot(
             metadata_filter=metadata_filter,
-            llm_kwargs=llm_kwargs
+            llm_kwargs=llm_kwargs if llm_kwargs else {},
         )
-        # This calls the LLM under the hood (via the RAG pipeline)
-        result = chatbot.query(question)
-        
+        result = chatbot.query(question, session_id=session_id, search_only=search_only)
+
+        if use_history and session_id:
+            result["session_id"] = session_id
+
         return JsonResponse(result)
-    
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
 
-
-@csrf_exempt
-@require_http_methods(["GET", "POST"])
-def rag_search_api(request):
-    """
-    API endpoint for searching content without AI-generated response.
-    
-    Supports both GET and POST methods for browser-based access.
-    
-    GET parameters:
-        q: Search query (required)
-        k: Number of results (optional, default: 10)
-        filter: JSON string for metadata filter (optional, e.g., '{"model": "BreadPage"}')
-    
-    POST data:
-    {
-        "query": "sourdough bread",  # required
-        "k": 10,  # optional, number of results
-        "filter": {"model": "BreadPage"}  # optional metadata filter
-    }
-    
-    Returns:
-    {
-        "query": "...",
-        "results": [
-            {
-                "content": "...",
-                "metadata": {...},
-                "score": 0.8234
-            },
-            ...
-        ],
-        "count": 10
-    }
-    """
-    try:
-        # Handle both GET and POST
-        if request.method == 'GET':
-            query = request.GET.get('q', '').strip()
-            k = request.GET.get('k', 10)
-            try:
-                k = int(k)
-            except (ValueError, TypeError):
-                k = 10
-            
-            filter_str = request.GET.get('filter', '')
-            metadata_filter = None
-            if filter_str:
-                try:
-                    metadata_filter = json.loads(filter_str)
-                except json.JSONDecodeError:
-                    metadata_filter = None
-        else:  # POST
-            data = json.loads(request.body)
-            query = data.get('query', '').strip()
-            k = data.get('k', 10)
-            try:
-                k = int(k)
-            except (ValueError, TypeError):
-                k = 10
-            metadata_filter = data.get('filter')
-        
-        if not query:
-            return JsonResponse(
-                {'error': 'Query is required. Use "q" parameter for GET or "query" for POST.'},
-                status=400,
-            )
-
-        # Log which models/providers are configured for this search
-        embedding_provider = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_PROVIDER', 'huggingface')
-        embedding_model = getattr(settings, 'WAGTAIL_RAG_EMBEDDING_MODEL', None) or 'default'
-        llm_provider = getattr(settings, 'WAGTAIL_RAG_LLM_PROVIDER', 'ollama')
-        llm_model = getattr(settings, 'WAGTAIL_RAG_MODEL_NAME', None) or 'default'
-
-        logger.warning(
-            "wagtail_rag.search API called | query=%r | k=%d | embedding=%s/%s | llm=%s/%s",
-            query,
-            k,
-            embedding_provider,
-            embedding_model,
-            llm_provider,
-            llm_model,
+    except Exception:
+        logger.exception("RAG chat API error")
+        return JsonResponse(
+            {"error": "An error occurred processing your request."},
+            status=500,
         )
 
-        chatbot = get_chatbot()
-        results = chatbot.search_with_embeddings(query, k=k, metadata_filter=metadata_filter)
-        
-        return JsonResponse({
-            'query': query,
-            'results': results,
-            'count': len(results)
-        })
-    
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
 
+@ensure_csrf_cookie
+def rag_chatbox_widget(request: HttpRequest) -> HttpResponse:
+    """Serve the RAG chatbox widget as a standalone page (for testing).
 
-def rag_chatbox_widget(request):
+    @ensure_csrf_cookie guarantees the csrftoken cookie is set on this response
+    so the embedded JS can read it for subsequent POST requests.
     """
-    Serve the RAG chatbox widget HTML page.
-    """
-    return render(request, 'wagtail_rag/chatbox.html')
+    return render(request, "wagtail_rag/chatbox.html")

@@ -1,506 +1,478 @@
 # Wagtail RAG Chatbot
 
-A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. This Django app provides a complete RAG solution that indexes your Wagtail pages into FAISS and provides a chatbot interface using LangChain with support for multiple LLM and embedding providers.
+> **Security Notice (May 2026)**: This version includes critical security updates for LangChain dependencies. Please upgrade to the latest version or ensure you have `langchain-community>=0.3.27` and `langchain-text-splitters>=0.3.9` installed. See [SECURITY.md](SECURITY.md) for details.
+
+A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. Drop `wagtail_rag` into any Wagtail site to get a fully working chatbot backed by your page content — no model-specific configuration required.
 
 ## Features
 
-- **Automatic Page Indexing**: Automatically discovers and indexes all Wagtail Page models
-- **Hybrid Search**: Combines FAISS vector search with Wagtail's built-in full-text search
-- **MultiQuery Retriever**: Uses LangChain's MultiQueryRetriever for better query understanding
-- **Fuzzy Matching**: Handles typos and partial matches in search queries
-- **Metadata Filtering**: Filter search results by page model, app, or custom metadata
-- **Deterministic IDs**: Enables efficient updates and single-page re-indexing
-- **Multiple LLM Providers**: Built-in support for **Ollama** (local) and **OpenAI** (hosted)
-- **Multiple Embedding Providers**: Support for OpenAI, HuggingFace, and Sentence Transformers
-- **Generic & Reusable**: Works with any Wagtail project without hardcoding model names
-- **Configurable via Django Settings**: All options configurable through Django settings (no command-line args required)
+- **Universal**: works with any Wagtail page model; auto-discovers content fields
+- **Per-field chunking**: each field (body, introduction, …) is chunked independently with section metadata, so the LLM always knows where a chunk came from
+- **Hybrid retrieval**: vector similarity search + optional Wagtail full-text search
+- **Multiple vector stores**: FAISS (default), ChromaDB, pgvector (PostgreSQL)
+- **Multiple embedding providers**: HuggingFace, Sentence Transformers, OpenAI
+- **Multiple LLM providers**: Ollama (local), OpenAI, Anthropic
+- **Chat history**: server-side with LLM summarisation of older turns
+- **Unified CLI**: one management command covers indexing, chat, and pipeline smoke-testing
+- **CSRF protection**: API endpoint enforces Django CSRF on POST requests
 
 ## Installation
 
-### 1. Install the Package
+### 1. Install the package with your chosen provider
 
-**From GitHub (recommended):**
 ```bash
-pip install git+https://github.com/awais786/wagtail-ai-chat.git
+# Local stack (recommended for development): FAISS + Sentence Transformers + Ollama
+pip install "wagtail-rag[local] @ git+https://github.com/awais786/wagtail-ai-chat.git"
+
+# OpenAI
+pip install "wagtail-rag[openai] @ git+https://github.com/awais786/wagtail-ai-chat.git"
+
+# All providers
+pip install "wagtail-rag[all] @ git+https://github.com/awais786/wagtail-ai-chat.git"
+
+# Local checkout (development)
+pip install -e ".[local]"
 ```
 
-**From source (local checkout):**
-```bash
-cd wagtail_rag
-pip install -e .
-```
+Available extras:
+
+| Extra | Installs |
+|---|---|
+| `faiss` | faiss-cpu |
+| `chroma` | chromadb |
+| `pgvector` | psycopg2-binary, sqlalchemy |
+| `sentence-transformers` | sentence-transformers |
+| `huggingface` | langchain-huggingface, sentence-transformers |
+| `openai` | langchain-openai |
+| `ollama` | ollama |
+| `anthropic` | langchain-anthropic |
+| `local` | faiss + sentence-transformers + ollama |
+| `all` | every provider |
 
 ### 2. Add to INSTALLED_APPS
 
-In your Django `settings.py`:
 ```python
+# settings.py
 INSTALLED_APPS = [
-    # ... other apps
-    'wagtail_rag',
+    # ...
+    "wagtail_rag",
 ]
 ```
 
-### 3. Install Provider Dependencies
+> `wagtail_rag` has no database models — no migration needed.
 
-**Install only the providers you need:**
+### 3. Configure settings
 
-**For local setup (HuggingFace embeddings + Ollama LLM):**
-```bash
-pip install wagtail-rag[local]
-# Or: pip install wagtail-rag[huggingface,ollama]
-# Or separately: pip install langchain-huggingface sentence-transformers ollama
-```
+Pick one setup block and add it to `settings.py`:
 
-**For HuggingFace embeddings only:**
-```bash
-pip install wagtail-rag[huggingface]
-# Or: pip install langchain-huggingface sentence-transformers
-```
-
-**For OpenAI (embeddings and/or LLM):**
-```bash
-pip install wagtail-rag[openai]
-# Or: pip install langchain-openai
-```
-
-**For Anthropic Claude LLM:**
-```bash
-pip install wagtail-rag[anthropic]
-# Or: pip install langchain-anthropic
-```
-
-**Install all providers (optional):**
-```bash
-pip install wagtail-rag[all]
-```
-
-**Note:** You can combine multiple providers in one command, e.g., `pip install wagtail-rag[huggingface,openai]`
-
-**Note:** Core dependencies (langchain, etc.) are automatically installed with the package. You need to install at least one vector store backend (FAISS or ChromaDB) and provider-specific dependencies.
-
-### 5. Add URL Configuration (Optional, for API endpoints)
-
-In your main `urls.py` (e.g., `bakerydemo/urls.py`):
 ```python
-# Import wagtail_rag URLs
-urlpatterns += [
-    path("", include("wagtail_rag.urls")),
+# --- Option A: Local (Ollama + Sentence Transformers + FAISS) ---
+WAGTAIL_RAG = {
+    "embedding":    {"provider": "sentence-transformers", "model": "all-MiniLM-L6-v2"},
+    "llm":          {"provider": "ollama", "model": "mistral"},
+    "vector_store": {"backend": "faiss", "path": os.path.join(BASE_DIR, "faiss_index")},
+}
+
+# --- Option B: OpenAI ---
+WAGTAIL_RAG = {
+    "embedding":    {"provider": "openai", "model": "text-embedding-3-small"},
+    "llm":          {"provider": "openai", "model": "gpt-4o"},
+    "vector_store": {"backend": "faiss", "path": os.path.join(BASE_DIR, "faiss_index")},
+}
+# Set OPENAI_API_KEY as an environment variable, not here
+```
+
+For Option A, make sure Ollama is running: `ollama serve` and `ollama pull mistral`.
+
+### 4. Add URL configuration (for the API endpoint and chatbox)
+
+```python
+# urls.py
+from django.urls import include, path
+from wagtail import urls as wagtail_urls
+
+urlpatterns = [
+    path("", include("wagtail_rag.urls")),  # must come before wagtail_urls
+    path("", include(wagtail_urls)),
 ]
 ```
 
-**Important**: Place `wagtail_rag_urls` before `wagtail_urls` so API routes are matched first.
+This exposes:
+- `GET/POST /api/rag/chat/` — chat API
+- `GET /chatbox/` — standalone widget page (for testing)
 
-After adding this, the API endpoints will be available at:
-- `http://localhost:8000/api/rag/chat/` - Chat endpoint (GET or POST)
-- `http://localhost:8000/api/rag/search/` - Search endpoint (GET or POST)
+### 5. Build the index
 
-### 6. Add the Global Floating Chatbox to Your Templates
+```bash
+python manage.py rag index
+```
 
-To render the bundled chat/search widget on every page (floating in the bottom-right corner), include this in a base template such as `base.html`:
+### 6. Verify with a test question
+
+```bash
+python manage.py rag chat -q "What content is on this site?"
+```
+
+Or run the built-in smoke test:
+
+```bash
+python manage.py rag test
+```
+
+### 7. Add the chatbox widget to your base template (optional)
+
+Add just before `</body>` in your base template:
 
 ```django
-{# Global RAG chatbox (from wagtail_rag) shown on all pages, floating bottom-right #}
-<div id="rag-chatbox-wrapper"
-     style="position: fixed; bottom: 1rem; right: 1rem; z-index: 9999;">
-    {% include "wagtail_rag/chatbox.html" %}
-</div>
+{% include "wagtail_rag/chatbox.html" %}
 ```
 
-## Quick Start
+This renders a floating action button (bottom-right). Clicking it opens the chat panel. The widget reads the Django `csrftoken` cookie and sends it automatically on every request.
 
-### 1. Configure Settings
+---
 
-Add these settings to your Django `settings.py`:
+## Management Command
 
-```python
-# Example 1: Local LLM (Ollama) + Local Embeddings (HuggingFace)
+All RAG operations go through a single command: `manage.py rag <subcommand>`.
 
-# Embedding model configuration
-WAGTAIL_RAG_EMBEDDING_PROVIDER = "huggingface"   # or "hf"
-WAGTAIL_RAG_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-
-# LLM configuration
-WAGTAIL_RAG_LLM_PROVIDER = "ollama"
-WAGTAIL_RAG_MODEL_NAME = "mistral"
-
-
-# Example 2: Hosted OpenAI for both LLM and embeddings
-
-# Embedding configuration
-WAGTAIL_RAG_EMBEDDING_PROVIDER = "openai"
-WAGTAIL_RAG_EMBEDDING_MODEL = "text-embedding-ada-002"
-
-# LLM configuration
-WAGTAIL_RAG_LLM_PROVIDER = "openai"
-WAGTAIL_RAG_MODEL_NAME = "gpt-4"
-OPENAI_API_KEY = "sk-..."  # or configure via environment variable
-
-
-# Vector Store Configuration (choose ChromaDB or FAISS)
-WAGTAIL_RAG_COLLECTION_NAME = "wagtail_rag"
-WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, "faiss_index")  # Path for FAISS index
-```
-
-### 2. Build the Index
+### `rag index` — build / reset the vector store
 
 ```bash
-python manage.py build_rag_index
+python manage.py rag index                  # full index build
+python manage.py rag index --clear     # wipe collection only
+python manage.py rag index --page-id 42     # re-index one page
 ```
 
-### 3. Use the Chatbot
+If you change embedding models, always reset first:
 
-**Via API (GET - Browser-friendly):**
 ```bash
-# Simple GET request (works in browser)
-curl "http://localhost:8000/api/rag/chat/?q=What content is available?"
+python manage.py rag index --clear
+python manage.py rag index
 ```
 
-**Via API (POST - JSON):**
+### `rag chat` — interactive or single-question chat
+
 ```bash
-curl -X POST http://localhost:8000/api/rag/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What content is available?"}'
+python manage.py rag chat                          # interactive loop
+python manage.py rag chat -q "What is sourdough?"  # single question
+python manage.py rag chat --search-only            # retrieval only, skip LLM
+python manage.py rag chat --no-sources             # hide source list
+python manage.py rag chat --no-history             # stateless mode
+python manage.py rag chat --filter '{"model":"BreadPage"}'
 ```
 
-**Note**: LLM provider and model are automatically read from Django settings (`WAGTAIL_RAG_LLM_PROVIDER` and `WAGTAIL_RAG_MODEL_NAME`). You don't need to pass them in the request.
+Interactive session commands: `exit`/`quit`, `clear` (new session), `sources on/off`, `Ctrl+C`.
 
-**Via Python:**
-```python
-from wagtail_rag.rag_chatbot import get_chatbot
+### `rag test` — smoke-test the full pipeline
 
-chatbot = get_chatbot()
-result = chatbot.query("What content is available?")
-print(result['answer'])
+```bash
+python manage.py rag test                                     # built-in questions, full RAG
+python manage.py rag test --search-only                       # retrieval only (faster)
+python manage.py rag test --questions "Q1" "Q2" "Q3"          # custom questions
+python manage.py rag test --filter '{"model":"BlogPage"}'     # scoped to a model
 ```
 
-## Configuration
+Pass criteria: non-empty answer **and** at least 1 source retrieved (full RAG), or at least 1 source (search-only).
 
-### Basic Settings
-
+Override the default questions via settings:
 ```python
-# FAISS index name
-WAGTAIL_RAG_COLLECTION_NAME = 'wagtail_rag'
-
-# FAISS index directory
-WAGTAIL_RAG_CHROMA_PATH = os.path.join(BASE_DIR, 'faiss_index')
-
-# Number of documents to retrieve (default: 8)
-WAGTAIL_RAG_RETRIEVE_K = 8
-
-# Enable/disable LLM query expansion via MultiQueryRetriever
-WAGTAIL_RAG_USE_LLM_QUERY_EXPANSION = True
-
-# Enable/disable hybrid search (default: True)
-WAGTAIL_RAG_USE_HYBRID_SEARCH = True
-```
-
-### Model Indexing Configuration
-
-```python
-# Models to index (None = index all Page models).
-# You can use the shorthand "app.Model:*" here to say:
-#   "index this model and treat all its content fields as important".
-WAGTAIL_RAG_MODELS = [
-    "blog.BlogPage",
-    "breads.BreadPage:*",       # index BreadPage, all fields
-    "products.ProductPage",     # index ProductPage, standard field extraction
+WAGTAIL_RAG_TEST_QUESTIONS = [
+    "What breads do you sell?",
+    "Where are you located?",
 ]
-
-# Models to exclude from indexing (always excluded, even if in WAGTAIL_RAG_MODELS)
-WAGTAIL_RAG_EXCLUDE_MODELS = [
-    "wagtailcore.Page",
-    "wagtailcore.Site",
-    "wagtailcore.Redirect",
-]
-
-# Text chunking configuration
-WAGTAIL_RAG_CHUNK_SIZE = 1000  # Size of each text chunk
-WAGTAIL_RAG_CHUNK_OVERLAP = 200  # Overlap between chunks
 ```
 
-### Custom Prompt Template (Optional)
+---
+
+## Makefile shortcuts
+
+```bash
+make install-local   # pip install -e ".[local,test,dev]"
+make install-openai  # pip install -e ".[openai,test,dev]"
+make install-all     # pip install -e ".[all,test,dev]"
+
+make index           # rag index
+make index-reset     # rag index --clear
+make index-rebuild   # reset then index
+make chat            # rag chat
+make test-rag        # rag test (full pipeline)
+make test-rag-search # rag test --search-only
+make test            # pytest unit tests
+make test-cov        # pytest with coverage
+make lint            # black + flake8
+make format          # black auto-format
+make clean           # remove cache and build files
+```
+
+---
+
+## Configuration Reference
+
+All configuration lives under a single `WAGTAIL_RAG` dict in `settings.py`. Flat `WAGTAIL_RAG_*` keys are still accepted as fallbacks for backwards compatibility.
+
+### Full example
 
 ```python
-WAGTAIL_RAG_PROMPT_TEMPLATE = """You are a helpful assistant. Use the following pieces of context from the website to answer the question accurately.
+import os
 
-Context: {context}
+WAGTAIL_RAG = {
+    # ── Embeddings ────────────────────────────────────────────────────────
+    "embedding": {
+        "provider": "sentence-transformers",  # "sentence-transformers" | "huggingface" | "openai"
+        "model":    "all-MiniLM-L6-v2",
+    },
 
-Question: {question}
+    # ── LLM ───────────────────────────────────────────────────────────────
+    "llm": {
+        "provider":                "ollama",   # "ollama" | "openai" | "anthropic"
+        "model":                   "mistral",
+        "max_context_chars":       0,          # max chars of context passed to LLM; 0 = unlimited
+        "enable_history":          True,       # server-side per-session chat history
+        "history_recent_messages": 6,          # recent turns kept verbatim (older turns summarised)
+    },
 
-Answer: """
+    # ── Vector store ──────────────────────────────────────────────────────
+    "vector_store": {
+        "backend":    "faiss",                              # "faiss" | "chroma" | "pgvector"
+        "path":       os.path.join(BASE_DIR, "faiss_index"),  # directory for FAISS / ChromaDB files
+        "collection": "wagtail_rag",                        # collection / index name
+        # "connection_string": "postgresql+psycopg2://..."  # pgvector only; omit to auto-derive
+    },
+
+    # ── Indexing ──────────────────────────────────────────────────────────
+    "indexing": {
+        "chunk_size":      1500,   # characters per chunk
+        "chunk_overlap":   100,    # overlap between consecutive chunks
+        "batch_size":      100,    # pages embedded per batch
+        "skip_if_indexed": True,   # skip pages that haven't changed since last index
+        "prune_deleted":   True,   # remove chunks for pages deleted from Wagtail
+        # key   = "app.ModelName"
+        # value = "*" (auto-discover all content fields) or ["field1", "field2"] (explicit)
+        "models": {
+            "locations.LocationPage": ["introduction", "body", "address"],
+            "breads.BreadPage":       "*",
+            "blog.BlogPage":          "*",
+        },
+    },
+
+    # ── Search / retrieval ────────────────────────────────────────────────
+    "search": {
+        "k":                   8,     # chunks retrieved per query
+        "max_sources":         3,     # unique pages shown as sources in the response
+        "use_hybrid":          True,  # combine vector search + Wagtail full-text search
+        "use_query_expansion": False, # generate multiple query variants via MultiQueryRetriever
+    },
+
+    # ── API ───────────────────────────────────────────────────────────────
+    "api": {
+        "max_question_length":   150,       # max characters in a question; 0 = unlimited
+        "max_request_body_size": 1048576,   # max POST body size in bytes (default 1 MB)
+        "rate_limit_per_minute": 0,         # requests per IP per minute; 0 = disabled
+    },
+}
 ```
 
-## Usage
+### Key settings explained
 
-### Building the RAG Index
+| Group | Key | Default | Description |
+|---|---|---|---|
+| `embedding` | `provider` | `"huggingface"` | Embedding backend |
+| `embedding` | `model` | provider default | Model name passed to the provider |
+| `llm` | `provider` | `"ollama"` | LLM backend |
+| `llm` | `model` | provider default | Model name |
+| `llm` | `max_context_chars` | `0` | Truncate retrieved context; `0` = no limit |
+| `llm` | `enable_history` | `True` | Enable server-side chat history |
+| `llm` | `history_recent_messages` | `6` | Recent turns kept verbatim |
+| `vector_store` | `backend` | `"faiss"` | Storage backend |
+| `vector_store` | `path` | `BASE_DIR/faiss_index` | Directory for FAISS / ChromaDB |
+| `vector_store` | `collection` | `"wagtail_rag"` | Collection / index name |
+| `vector_store` | `connection_string` | derived from `DATABASES` | pgvector only |
+| `indexing` | `models` | `{}` | Models and fields to index |
+| `indexing` | `chunk_size` | `1500` | Characters per chunk |
+| `indexing` | `chunk_overlap` | `100` | Overlap between chunks |
+| `indexing` | `skip_if_indexed` | `True` | Skip unchanged pages |
+| `indexing` | `prune_deleted` | `True` | Remove stale chunks |
+| `search` | `k` | `8` | Chunks retrieved per query |
+| `search` | `max_sources` | `3` | Source pages shown in response |
+| `search` | `use_hybrid` | `True` | Vector + Wagtail full-text search |
+| `search` | `use_query_expansion` | `True` | MultiQueryRetriever query expansion |
+| `api` | `max_question_length` | `150` | Max question length; `0` = no limit |
+| `api` | `max_request_body_size` | `1048576` | Max POST body (bytes) |
+| `api` | `rate_limit_per_minute` | `0` | Per-IP rate limit; `0` = disabled |
 
-Index your Wagtail pages (uses your Django settings):
+### Flat settings (backwards-compatible fallbacks)
 
-```bash
-python manage.py build_rag_index
-```
-
-Common variations:
-
-```bash
-# Reset (clear) the existing FAISS index, then rebuild the index
-python manage.py build_rag_index --reset
-
-# Only reset/clear the collection without indexing
-python manage.py build_rag_index --reset-only
-
-# Re-index a single page by ID (useful after editing one page)
-python manage.py build_rag_index --page-id 123
-
-# Limit to specific models
-python manage.py build_rag_index --models blog.BlogPage breads.BreadPage
-
-# Exclude specific models
-python manage.py build_rag_index --exclude-models blog.DraftPage
-```
-
-### Using the Chatbot in Python
+The following flat settings are still read when the corresponding grouped key is absent:
 
 ```python
-from wagtail_rag.rag_chatbot import get_chatbot
-
-# Get chatbot instance (uses settings defaults)
-chatbot = get_chatbot()
-
-# Query the chatbot (this calls the LLM under the hood)
-result = chatbot.query("What types of bread do you have?")
-print(result['answer'])
-print(result['sources'])
-
-# Filter by model
-chatbot_filtered = get_chatbot(metadata_filter={'model': 'BreadPage'})
-result = chatbot_filtered.query("Tell me about multigrain bread")
-
-# Use different provider/model
-chatbot_openai = get_chatbot(
-    llm_provider='openai',
-    model_name='gpt-4',
-    llm_kwargs={'temperature': 0.7}
-)
-result = chatbot_openai.query("What content do you have?")
-
-# Search without generating response (embedding search only, no LLM)
-results = chatbot.search_with_embeddings("multigrain bread", k=10)
-for result in results:
-    print(f"Title: {result['metadata']['title']}")
-    print(f"Score: {result['score']}")
-    print(f"Content: {result['content'][:200]}...")
+# Kept for existing deployments — prefer the grouped dict above
+WAGTAIL_RAG_EXCLUDE_MODELS           = ["wagtailcore.Page", "wagtailcore.Site"]
+WAGTAIL_RAG_MODELS                   = ["breads.BreadPage"]  # fallback for indexing.models
+WAGTAIL_RAG_TEST_QUESTIONS           = ["What breads do you sell?"]  # rag test questions
 ```
 
-### Using the API Endpoints
+### pgvector (PostgreSQL)
 
-#### Chat API (`/api/rag/chat/`)
+Use pgvector when you want the vector index stored in your existing PostgreSQL database rather than on disk.
 
-The chat API supports both GET and POST methods. LLM provider and model are automatically read from Django settings.
+```python
+WAGTAIL_RAG = {
+    "embedding": {
+        "provider": "openai",
+        "model":    "text-embedding-3-small",
+    },
+    "llm": {
+        "provider": "openai",
+        "model":    "gpt-4o",
+    },
+    "vector_store": {
+        "backend":           "pgvector",
+        "collection":        "wagtail_rag",
+        # Explicit connection string — omit to auto-derive from DATABASES['default']
+        "connection_string": "postgresql+psycopg2://user:password@localhost:5432/mydb",
+    },
+}
+```
 
-**GET Request (Browser-friendly):**
+If `connection_string` is omitted, the connection is derived automatically from `DATABASES['default']` (must be a PostgreSQL engine). Install the extra:
+
 ```bash
-# Simple query
-curl "http://localhost:8000/api/rag/chat/?q=What types of bread do you have?"
-
-# With metadata filter (JSON string)
-curl "http://localhost:8000/api/rag/chat/?q=Tell me about multigrain bread&filter=%7B%22model%22%3A%22BreadPage%22%7D"
-# Or in browser: http://localhost:8000/api/rag/chat/?q=bread&filter={"model":"BreadPage"}
+pip install "wagtail-rag[pgvector]"
 ```
 
-**POST Request (JSON):**
+---
+
+## API Endpoints
+
+### `GET /api/rag/chat/`
+
+No CSRF token required for GET. The response also sets the `csrftoken` cookie for subsequent POST requests.
+
 ```bash
-# Basic query
-curl -X POST http://localhost:8000/api/rag/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "What types of bread do you have?"
-  }'
-
-# With LLM parameters (temperature, etc.)
-curl -X POST http://localhost:8000/api/rag/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "What types of bread do you have?",
-    "llm_kwargs": {"temperature": 0.7}
-  }'
-
-# With metadata filter
-curl -X POST http://localhost:8000/api/rag/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "Tell me about multigrain bread",
-    "filter": {"model": "BreadPage"}
-  }'
+curl "http://localhost:8000/api/rag/chat/?q=What+types+of+bread+do+you+have?"
 ```
 
-**Response:**
+### `POST /api/rag/chat/`
+
+CSRF token required. Obtain it from the `csrftoken` cookie set by the GET above:
+
+```bash
+# Step 1: get the CSRF token
+CSRF=$(curl -sc /tmp/jar "http://localhost:8000/api/rag/chat/?q=ping" \
+       | python3 -c "import sys,json; print(json.load(sys.stdin).get('answer',''))" 2>/dev/null; \
+       grep csrftoken /tmp/jar | awk '{print $NF}')
+
+# Step 2: POST with the token
+curl -b /tmp/jar -X POST http://localhost:8000/api/rag/chat/ \
+  -H "Content-Type: application/json" \
+  -H "X-CSRFToken: $CSRF" \
+  -d '{"question": "What types of bread do you have?", "session_id": "abc123"}'
+```
+
+Response `200`:
 ```json
 {
-  "answer": "We have several types of bread including...",
+  "answer": "We have several types including...",
   "sources": [
     {
       "content": "...",
-      "metadata": {
-        "title": "Multigrain Bread",
-        "url": "/breads/multigrain/",
-        "model": "BreadPage"
-      }
-    }
-  ]
-}
-```
-
-#### Search API (`/api/rag/search/`)
-
-The search API performs semantic search without generating an AI response. Useful for finding relevant content.
-
-**GET Request:**
-```bash
-# Basic search
-curl "http://localhost:8000/api/rag/search/?q=sourdough bread"
-
-# With number of results
-curl "http://localhost:8000/api/rag/search/?q=sourdough bread&k=5"
-
-# With metadata filter
-curl "http://localhost:8000/api/rag/search/?q=bread&filter=%7B%22model%22%3A%22BreadPage%22%7D"
-```
-
-**POST Request:**
-```bash
-curl -X POST http://localhost:8000/api/rag/search/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "sourdough bread",
-    "k": 5,
-    "filter": {"model": "BreadPage"}
-  }'
-```
-
-**Response:**
-```json
-{
-  "query": "sourdough bread",
-  "results": [
-    {
-      "content": "...",
-      "metadata": {
-        "title": "Sourdough Bread Recipe",
-        "url": "/breads/sourdough/",
-        "model": "BreadPage"
-      },
-      "score": 0.8234
+      "metadata": {"title": "Multigrain Bread", "url": "/breads/multigrain/", "model": "BreadPage", "section": "body"}
     }
   ],
-  "count": 5
+  "session_id": "abc123"
 }
 ```
+
+Error codes: `400` bad request · `403` missing/invalid CSRF token · `413` body too large · `415` wrong Content-Type · `500` server error.
+
+---
+
+## Python API
+
+```python
+from wagtail_rag.chatbot import get_chatbot
+
+chatbot = get_chatbot()
+result  = chatbot.query("What types of bread do you have?")
+print(result["answer"])
+print(result["sources"])
+
+# Filter by model
+chatbot = get_chatbot(metadata_filter={"model": "BreadPage"})
+
+# Search only (no LLM call)
+result = chatbot.query("sourdough", search_only=True)
+
+# Specific provider
+chatbot = get_chatbot(llm_provider="openai", model_name="gpt-4o")
+```
+
+---
 
 ## How It Works
 
-1. **Indexing**: The `build_rag_index` command:
-   - Discovers all Wagtail Page models dynamically
-   - Extracts text from pages (title, body, StreamField, RichTextField, etc.)
-   - Chunks the text using RecursiveCharacterTextSplitter
-   - Generates embeddings using the configured embedding provider
-   - Stores chunks in ChromaDB with deterministic IDs
+1. **Indexing** (`rag index`): discovers live Wagtail pages → extracts each field independently → chunks with paragraph preservation → prepends `Page: / Section:` header to every chunk → upserts into vector store with deterministic IDs (`{page_id}_{field}_{chunk_index}`). Stale chunks are removed before re-indexing.
 
-2. **Querying**: The chatbot:
-   - Uses MultiQueryRetriever to generate query variations
-   - Searches FAISS for similar chunks
-   - Optionally searches Wagtail's full-text index (hybrid search)
-   - Combines and deduplicates results
-   - Boosts documents with matching titles (handles typos)
-   - Passes context to LLM for answer generation
+2. **Querying** (`rag chat` / API): embeds the question → vector similarity search → optional Wagtail full-text search → deduplicate & title-boost → pass top-k chunks as context to LLM → return answer + sources.
 
-## Architecture
+---
 
-- **Vector Store**: FAISS for storing embeddings
-- **Embeddings**: Multiple providers supported (HuggingFace, OpenAI, Sentence Transformers)
-- **LLM**: Multiple providers supported (Ollama, OpenAI; extensible to others)
-- **Framework**: LangChain for orchestration
-- **Search**: Hybrid search (FAISS + Wagtail full-text)
+## Testing
+
+```bash
+# Unit tests
+pytest wagtail_rag/tests/ -v
+
+# With coverage
+pytest wagtail_rag/tests/ --cov=wagtail_rag --cov-report=term-missing
+
+# Individual modules
+pytest wagtail_rag/tests/test_rag_command.py    # unified rag command
+pytest wagtail_rag/tests/test_providers.py      # embedding & LLM factories
+pytest wagtail_rag/tests/test_extraction.py     # chunking & field extraction
+pytest wagtail_rag/tests/test_index_builder.py  # pgvector, batch upsert helpers
+pytest wagtail_rag/tests/test_generation.py     # LLM generation
+pytest wagtail_rag/tests/test_api_views.py      # REST API + CSRF
+pytest wagtail_rag/tests/test_search.py         # hybrid search
+```
+
+CI runs on Python 3.11 and 3.12 against Django 4.2 and 5.2.
+
+---
 
 ## Troubleshooting
 
-### "Collection expecting embedding with dimension of X, got Y"
-
-This error occurs when you change embedding providers/models without resetting the index. Different embedding models produce vectors of different dimensions.
-
-**Solution:**
+**"Collection expecting embedding with dimension of X, got Y"** — changed embedding model without resetting the index.
 ```bash
-python manage.py build_rag_index --reset
+make index-rebuild
 ```
 
-### "The model 'X' does not exist or you do not have access to it"
-
-This error occurs when you specify a model name that doesn't match the provider (e.g., using an Ollama model name with OpenAI provider).
-
-**Solution**: The system will automatically detect this and use the provider's default model. Make sure your settings match:
+**"The model X does not exist"** — model name doesn't match the provider. Set the correct model in `WAGTAIL_RAG`:
 ```python
-WAGTAIL_RAG_LLM_PROVIDER = 'openai'
-WAGTAIL_RAG_MODEL_NAME = 'gpt-4'  # Not 'mistral' (Ollama model)
+WAGTAIL_RAG = {
+    "llm": {"provider": "openai", "model": "gpt-4o"},
+    ...
+}
 ```
 
-### "No pages found to index"
+**"No pages found to index"** — check pages are published and `indexing.models` keys use the correct format (`"app.ModelName"`).
 
-- Make sure you have published pages in Wagtail admin
-- Check pages are live (not draft)
-- Verify your `WAGTAIL_RAG_MODELS` setting includes the correct model names
+**"Connection refused" (Ollama)** — run `ollama serve` first, then `ollama pull mistral`.
 
-### "Connection refused" (Ollama)
+**403 on POST** — CSRF token missing. Read the `csrftoken` cookie from a GET response and send it as `X-CSRFToken` header.
 
-- Make sure `ollama serve` is running
-- Test with: `ollama list`
+**Import errors** — install the required extra: `pip install "wagtail-rag[local]"`.
 
-### "Could not import LangChain" or "HuggingFace embeddings not available"
-
-- Core dependencies are installed automatically with the package
-- Install provider-specific dependencies based on your configuration:
-  - **Local setup**: `pip install wagtail-rag[local]` (HuggingFace + Ollama)
-  - **HuggingFace**: `pip install wagtail-rag[huggingface]`
-  - **OpenAI**: `pip install wagtail-rag[openai]`
-  - **Ollama**: `pip install wagtail-rag[ollama]`
-  - **All providers**: `pip install wagtail-rag[all]`
+---
 
 ## Requirements
 
-**Core Requirements** (installed automatically):
-- Python 3.8+
-- Django 3.2+
-- Wagtail 4.0+
-- FAISS
-- LangChain (core packages)
-
-**Provider Requirements** (install only what you need):
-
-**Embedding Providers:**
-- **HuggingFace** (default): `pip install wagtail-rag[huggingface]` or `pip install langchain-huggingface sentence-transformers`
-- **OpenAI**: `pip install wagtail-rag[openai]` or `pip install langchain-openai`
-
-**LLM Providers:**
-- **Ollama** (local): `pip install wagtail-rag[ollama]` or `pip install ollama`
-- **OpenAI**: `pip install wagtail-rag[openai]` or `pip install langchain-openai`
-- **Anthropic**: `pip install wagtail-rag[anthropic]` or `pip install langchain-anthropic`
-
-**Common combinations:**
-- **Local setup**: `pip install wagtail-rag[local]` (HuggingFace embeddings + Ollama LLM)
-- **OpenAI setup**: `pip install wagtail-rag[openai]` (OpenAI embeddings + LLM)
-
-**Install all providers at once:**
-```bash
-pip install wagtail-rag[all]
-```
-
-## Example Configuration
-
-See [CONFIGURATION_EXAMPLE.py](CONFIGURATION_EXAMPLE.py) for a complete example of all available settings.
+- Python 3.9+
+- Django 4.2+
+- Wagtail 6.0+
+- LangChain (installed automatically)
+- At least one provider extra (see Installation)
 
 ## License
 
-MIT License
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+MIT — see [LICENSE](LICENSE).

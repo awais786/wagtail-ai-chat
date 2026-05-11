@@ -1,23 +1,20 @@
-"""Content extraction and RAG index building for Wagtail."""
+"""
+Content extraction and indexing for Wagtail RAG.
 
-from .content_extraction import (
-    clean_html,
-    extract_page_content,
-    extract_streamfield_text,
-    get_page_url,
-)
-from .extractors import wagtail_page_to_documents
-from .indexer import ChromaStore, build_rag_index, get_live_pages, get_page_models
+- api_fields_extractor: extracts and chunks page content into LangChain Documents
+- vector_store: VectorStore wrapper for FAISS, ChromaDB, and pgvector
+- index_builder: build_rag_index orchestration
+"""
+
+from .api_fields_extractor import WagtailAPIExtractor, page_to_documents_api_extractor
+from .vector_store import VectorStore
+from .index_builder import build_rag_index, get_live_pages, get_page_models
 
 __all__ = [
+    "page_to_documents_api_extractor",
+    "WagtailAPIExtractor",
+    "VectorStore",
     "build_rag_index",
-    "ChromaStore",
-    "clean_html",
-    "extract_page_content",
-    "extract_streamfield_text",
-    "get_live_pages",
     "get_page_models",
-    "get_page_url",
-    "wagtail_page_to_documents",
+    "get_live_pages",
 ]
-
