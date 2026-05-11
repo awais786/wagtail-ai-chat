@@ -1,5 +1,7 @@
 # Wagtail RAG Chatbot
 
+> **Security Notice (May 2026)**: This version includes critical security updates for LangChain dependencies. Please upgrade to the latest version or ensure you have `langchain-community>=0.3.27` and `langchain-text-splitters>=0.3.9` installed. See [SECURITY.md](SECURITY.md) for details.
+
 A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. Drop `wagtail_rag` into any Wagtail site to get a fully working chatbot backed by your page content — no model-specific configuration required.
 
 ## Features
