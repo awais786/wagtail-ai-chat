@@ -192,7 +192,8 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             elif isinstance(_tac_val, str):
                 _tac_lower = _tac_val.lower()
                 use_token_aware_chunking = (
-                    True if _tac_lower in ("true", "1", "yes")
+                    True
+                    if _tac_lower in ("true", "1", "yes")
                     else (False if _tac_lower in ("false", "0", "no") else None)
                 )
             else:

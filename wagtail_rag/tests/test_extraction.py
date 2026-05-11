@@ -300,7 +300,9 @@ class TestFeatureFlagExtractor(unittest.TestCase):
         page.__class__.__name__ = "TestPage"
 
         mock_block = MagicMock()
-        mock_block.render_as_block.return_value = "First block text that is long enough."
+        mock_block.render_as_block.return_value = (
+            "First block text that is long enough."
+        )
         mock_block.block_type = "paragraph"
         page.body = [mock_block]
 
