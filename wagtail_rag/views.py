@@ -97,8 +97,8 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
     Protect this endpoint at the network level (auth, rate limiting) if it is
     publicly exposed.
 
-    GET  ?q=<question>[&session_id=<id>][&filter=<json>][&search_only=true]
-    POST {"question": "...", "session_id": "...", "filter": {}, "llm_kwargs": {}, "search_only": false}
+    GET  ?q=<question>[&session_id=<id>][&filter=<json>][&search_only=true][&use_token_aware_chunking=true]
+    POST {"question": "...", "session_id": "...", "filter": {}, "llm_kwargs": {}, "search_only": false, "use_token_aware_chunking": null}
 
     Response 200: {"answer": "...", "sources": [...], "session_id": "..."}
     Response 400: {"error": "..."}
@@ -131,6 +131,13 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
                 "yes",
             )
             llm_kwargs: dict = {}
+
+            _tac_raw = (request.GET.get("use_token_aware_chunking") or "").lower()
+            use_token_aware_chunking: Optional[bool] = (
+                True
+                if _tac_raw in ("true", "1", "yes")
+                else (False if _tac_raw in ("false", "0", "no") else None)
+            )
 
             filter_str = request.GET.get("filter", "")
             metadata_filter: Optional[dict] = None
@@ -175,6 +182,22 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
             search_only = bool(data.get("search_only", False))
             metadata_filter = _validate_metadata_filter(data.get("filter"))
             llm_kwargs = _sanitize_llm_kwargs(data.get("llm_kwargs"))
+            _tac_val = data.get("use_token_aware_chunking")
+            if _tac_val is None:
+                use_token_aware_chunking = None
+            elif isinstance(_tac_val, bool):
+                use_token_aware_chunking = _tac_val
+            elif isinstance(_tac_val, (int, float)):
+                use_token_aware_chunking = bool(_tac_val)
+            elif isinstance(_tac_val, str):
+                _tac_lower = _tac_val.lower()
+                use_token_aware_chunking = (
+                    True
+                    if _tac_lower in ("true", "1", "yes")
+                    else (False if _tac_lower in ("false", "0", "no") else None)
+                )
+            else:
+                use_token_aware_chunking = None
 
         # ── validate question ─────────────────────────────────────────
         if not question:
@@ -214,11 +237,14 @@ def rag_chat_api(request: HttpRequest) -> JsonResponse:
         chatbot = get_chatbot(
             metadata_filter=metadata_filter,
             llm_kwargs=llm_kwargs if llm_kwargs else {},
+            use_token_aware_chunking=use_token_aware_chunking,
         )
         result = chatbot.query(question, session_id=session_id, search_only=search_only)
 
         if use_history and session_id:
             result["session_id"] = session_id
+
+        result["use_token_aware_chunking"] = chatbot.use_token_aware_chunking
 
         return JsonResponse(result)
 

@@ -24,11 +24,12 @@ deployments continue to work without changes.
             # "connection_string": "postgresql+psycopg2://..."  # pgvector only
         },
         "indexing": {
-            "chunk_size":      1500,
-            "chunk_overlap":   100,
+            "chunk_size":      800,
+            "chunk_overlap":   128,
             "batch_size":      100,
             "skip_if_indexed": True,
             "prune_deleted":   True,
+            "use_token_aware_chunking": False,  # True → token-aware paragraph chunker; False → RecursiveCharacterTextSplitter
             "models": {
                 # ["f1", "f2"] → use exactly these fields
                 # "*"          → use Wagtail search_fields automatically
@@ -37,7 +38,7 @@ deployments continue to work without changes.
             },
         },
         "search": {
-            "k":                  8,    # chunks retrieved per query
+            "k":                  10,   # chunks retrieved per query
             "max_sources":        3,    # unique pages shown as sources
             "use_hybrid":         True, # combine vector + Wagtail full-text search
             "use_query_expansion": True, # MultiQueryRetriever
@@ -201,12 +202,12 @@ class _IndexingConf:
 
     @property
     def chunk_size(self) -> int:
-        return _get_int(self._group(), "chunk_size", "WAGTAIL_RAG_CHUNK_SIZE", 1500)
+        return _get_int(self._group(), "chunk_size", "WAGTAIL_RAG_CHUNK_SIZE", 800)
 
     @property
     def chunk_overlap(self) -> int:
         return _get_int(
-            self._group(), "chunk_overlap", "WAGTAIL_RAG_CHUNK_OVERLAP", 100
+            self._group(), "chunk_overlap", "WAGTAIL_RAG_CHUNK_OVERLAP", 128
         )
 
     @property
@@ -227,6 +228,15 @@ class _IndexingConf:
             self._group(), "prune_deleted", "WAGTAIL_RAG_PRUNE_DELETED", True
         )
 
+    @property
+    def use_token_aware_chunking(self) -> bool:
+        return _get_bool(
+            self._group(),
+            "use_token_aware_chunking",
+            "WAGTAIL_RAG_USE_TOKEN_AWARE_CHUNKING",
+            False,
+        )
+
 
 class _SearchConf:
     def _group(self) -> dict:
@@ -234,7 +244,7 @@ class _SearchConf:
 
     @property
     def k(self) -> int:
-        return _get_int(self._group(), "k", "WAGTAIL_RAG_RETRIEVE_K", 8)
+        return _get_int(self._group(), "k", "WAGTAIL_RAG_RETRIEVE_K", 10)
 
     @property
     def max_sources(self) -> int:

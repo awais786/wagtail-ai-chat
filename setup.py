@@ -37,7 +37,7 @@ setup(
     install_requires=[
         "django>=3.2",
         "wagtail>=4.0",
-        "langchain>=0.1.0,<0.2.0",
+        "langchain>=0.3.0",
         "langchain-community>=0.3.27",  # Security: Fix XXE, SSRF, and pickle deserialization vulnerabilities
         "langchain-text-splitters>=0.3.9",  # Security: Fix XXE vulnerability via unsafe XSLT parsing
         "beautifulsoup4>=4.12.0",

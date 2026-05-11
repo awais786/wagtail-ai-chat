@@ -8,6 +8,7 @@ A plug-and-play RAG (Retrieval-Augmented Generation) chatbot for Wagtail CMS. Dr
 
 - **Universal**: works with any Wagtail page model; auto-discovers content fields
 - **Per-field chunking**: each field (body, introduction, …) is chunked independently with section metadata, so the LLM always knows where a chunk came from
+- **Token-aware chunking**: paragraph-first splitting with token-aware sizing (default `chunk_size=800`, `chunk_overlap=128`)
 - **Hybrid retrieval**: vector similarity search + optional Wagtail full-text search
 - **Multiple vector stores**: FAISS (default), ChromaDB, pgvector (PostgreSQL)
 - **Multiple embedding providers**: HuggingFace, Sentence Transformers, OpenAI
@@ -241,8 +242,8 @@ WAGTAIL_RAG = {
 
     # ── Indexing ──────────────────────────────────────────────────────────
     "indexing": {
-        "chunk_size":      1500,   # characters per chunk
-        "chunk_overlap":   100,    # overlap between consecutive chunks
+        "chunk_size":      800,    # target tokens per chunk
+        "chunk_overlap":   128,    # token overlap between consecutive chunks
         "batch_size":      100,    # pages embedded per batch
         "skip_if_indexed": True,   # skip pages that haven't changed since last index
         "prune_deleted":   True,   # remove chunks for pages deleted from Wagtail
@@ -257,7 +258,7 @@ WAGTAIL_RAG = {
 
     # ── Search / retrieval ────────────────────────────────────────────────
     "search": {
-        "k":                   8,     # chunks retrieved per query
+        "k":                   10,    # chunks retrieved per query
         "max_sources":         3,     # unique pages shown as sources in the response
         "use_hybrid":          True,  # combine vector search + Wagtail full-text search
         "use_query_expansion": False, # generate multiple query variants via MultiQueryRetriever
@@ -288,11 +289,11 @@ WAGTAIL_RAG = {
 | `vector_store` | `collection` | `"wagtail_rag"` | Collection / index name |
 | `vector_store` | `connection_string` | derived from `DATABASES` | pgvector only |
 | `indexing` | `models` | `{}` | Models and fields to index |
-| `indexing` | `chunk_size` | `1500` | Characters per chunk |
-| `indexing` | `chunk_overlap` | `100` | Overlap between chunks |
+| `indexing` | `chunk_size` | `800` | Target tokens per chunk |
+| `indexing` | `chunk_overlap` | `128` | Token overlap between chunks |
 | `indexing` | `skip_if_indexed` | `True` | Skip unchanged pages |
 | `indexing` | `prune_deleted` | `True` | Remove stale chunks |
-| `search` | `k` | `8` | Chunks retrieved per query |
+| `search` | `k` | `10` | Chunks retrieved per query |
 | `search` | `max_sources` | `3` | Source pages shown in response |
 | `search` | `use_hybrid` | `True` | Vector + Wagtail full-text search |
 | `search` | `use_query_expansion` | `True` | MultiQueryRetriever query expansion |
@@ -411,7 +412,7 @@ chatbot = get_chatbot(llm_provider="openai", model_name="gpt-4o")
 
 ## How It Works
 
-1. **Indexing** (`rag index`): discovers live Wagtail pages → extracts each field independently → chunks with paragraph preservation → prepends `Page: / Section:` header to every chunk → upserts into vector store with deterministic IDs (`{page_id}_{field}_{chunk_index}`). Stale chunks are removed before re-indexing.
+1. **Indexing** (`rag index`): discovers live Wagtail pages → auto-discovers text-bearing fields (including `*_search_text`) → creates one canonical full-page blob + labeled per-field chunks with paragraph-first token-aware splitting → prepends `Page: / Section:` header to every chunk → upserts into vector store with deterministic IDs (`{page_id}_{field}_{chunk_index}`). Stale chunks are removed before re-indexing.
 
 2. **Querying** (`rag chat` / API): embeds the question → vector similarity search → optional Wagtail full-text search → deduplicate & title-boost → pass top-k chunks as context to LLM → return answer + sources.
 
